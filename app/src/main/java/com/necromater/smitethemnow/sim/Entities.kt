@@ -7,8 +7,11 @@ package com.necromater.smitethemnow.sim
 
 enum class Faction { BELIEVER, NON_BELIEVER }
 
-/** A LEADER preaches: the Prophet for the Believers, the Heretic for the heathens. */
-enum class Role { FOLLOWER, LEADER }
+/**
+ * A LEADER preaches: the Prophet for the Believers, the Heretic for the heathens.
+ * An INQUISITOR is a heathen who walks up to Believers and kills them.
+ */
+enum class Role { FOLLOWER, LEADER, INQUISITOR }
 
 /** CALM is the default. ZEALOT and TERROR apply to Believers, SPOOKED to Non-Believers. */
 enum class Mood { CALM, ZEALOT, TERROR, SPOOKED }
@@ -54,7 +57,15 @@ class Npc(var x: Float, var y: Float, var faction: Faction, val role: Role = Rol
     /** The fallen Lightning Rod this heathen has been sent to rebuild. */
     var task: Rod? = null
 
+    /** The building this heathen is hiding in. Hidden people cannot be seen or hit. */
+    var inside: Building? = null
+    var shelterClock = 0f
+    /** 0..1: an Inquisitor's wind-up before the blow lands. */
+    var strike = 0f
+
     val isLeader: Boolean get() = role == Role.LEADER
+    val isFollower: Boolean get() = role == Role.FOLLOWER
+    val isInquisitor: Boolean get() = role == Role.INQUISITOR
 }
 
 class Building(val x: Float, val y: Float, val w: Float, val h: Float, val holy: Boolean = false) {

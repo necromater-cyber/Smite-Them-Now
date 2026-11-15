@@ -48,6 +48,25 @@ Each side has one leader per level, drawn larger than the followers, with a visi
 - **The Heretic** (Non-Believers): walks to the nearest flock and leads one Believer astray every 5 seconds inside his ring (110 units), at 10 Faith each. He does not scare and cannot be converted. A ward absorbs the first Bolt; blasts and fire ignore it. Zealots, shielded Believers and fresh converts are immune to him. Killing him pays 10 Prayer and panics every heathen.
 - A bar over a follower's head shows how far they have been talked round. It drains when the preacher loses reach.
 
+### 4.3 Inquisitors
+
+Heathens who attack. Chapters IV and V.
+
+- An Inquisitor walks at a steady pace to the Prophet if he lives, otherwise to the nearest Believer.
+- In reach, he winds up for 1.3 seconds (a bar fills, the sword lifts) and kills. A Shield over the victim stops the blow.
+- A Believer killed this way costs 15 Faith ("Martyred") instead of 25. The Prophet still costs 50.
+- Inquisitors do not scare, shelter, or convert. One Bolt kills them.
+- Chapter V sends three more in from the page edges at 0:40 and 1:25.
+
+### 4.4 Sheltering
+
+Chapters IV and V.
+
+- A spooked heathen follower with an ordinary (not holy) building within 340 units runs to its door and goes inside, instead of running to the flock.
+- Inside, they cannot be seen, hit, burned, blown about, preached to or counted as witnesses. The doorway shows eyes and a head count.
+- They come out after 5 seconds. A Meteor glowing nearby keeps them in.
+- A collapse kills everyone inside in the same instant, so a full house is the longest chain in the game. The intended play: herd them indoors with a charging Meteor, then drop it on the roof.
+
 ### 4.2 Witness conversion
 
 - A Non-Believer follower within 170 units of a smiting has a 10% chance to convert on the spot while the Prophet lives, 5% without him. The rest are spooked as before.
@@ -83,6 +102,10 @@ Earthquakes add a visible lean to tall buildings. An Anvil dropped on the edge o
 Kills in quick succession form a chain. Each extra link pays more Prayer. This favours the Trickster/Puppeteer playstyle.
 
 **In the proof of concept:** links must land within 0.8 seconds of each other, each link adds 1 Prayer on top of the base 2, capped at 6 extra. The short window is deliberate: it rewards barrel and fire chains, and stops rapid Bolt taps from paying for themselves.
+
+### 5.6 Divine Fatigue
+
+Chapters IV and V. Each Bolt adds one step of fatigue, and each step adds 4 Prayer to the next Bolt, up to 5 steps (12 rising to 32). Fatigue recovers at 0.6 steps per second. A Bolt every two seconds is always full price; tapping as fast as you can is not. The other powers are unaffected.
 
 ### 5.5 Destructible buildings
 
@@ -132,7 +155,7 @@ Everything is drawn in code for now. Hand-painted assets come later.
 
 **Purpose:** find out whether tap, hold and swipe feel good on a phone, and whether human shields, Zealotry and barrel chains produce interesting decisions in a 2–3 minute round.
 
-**Scope:** three chapters chosen from a chapter list, four powers, a leader on each side, conversion, destructible buildings, a briefing card per chapter, win and lose cards with a star rating, best stars saved per chapter.
+**Scope:** five chapters chosen from a chapter list, four powers, a leader on each side, conversion, destructible buildings, a briefing card per chapter, win and lose cards with a star rating, best stars saved per chapter.
 
 **Stars:** one for winning, one for losing no Believers (dead or led astray), one for reaching the chapter's chain goal. A Bolt-only win earns two at most.
 
@@ -141,6 +164,8 @@ Everything is drawn in code for now. Hand-painted assets come later.
 | I. A Gentle Smiting | 6 + Prophet | 9 | 2 | 0 | 2:00 | 2 |
 | II. Market Day | 10 + Prophet | 19 + Heretic | 7 | 0 | 2:30 | 3 |
 | III. The Defiant | 9 + Prophet | 17 + Heretic | 4 | 3 | 2:45 | 4 |
+| IV. The Inquisition | 7 + Prophet | 15 + 3 Inquisitors | 3 | 0 | 2:45 | 4 |
+| V. Day of Reckoning | 10 + Prophet | 17 + Heretic + 2 Inquisitors, 3 more arriving | 4 | 2 | 3:00 | 5 |
 
 **Tuning values** (all at the top of `sim/World.kt`):
 
@@ -155,7 +180,13 @@ Everything is drawn in code for now. Hand-painted assets come later.
 | Faith lost per Believer killed | 25 of 100 |
 | Zealot duration / Terror duration | 6 s / 5 s |
 
-A scripted bot with perfect aim, using only Bolts and going for the Heretic first, clears chapter I in 12–20 seconds, II in about 30 and III in 35–40, for two stars. A slower bot that ignores the Heretic still wins but loses up to five Believers to him. Lighting the barrel line gives a chain of 3–5 on chapters II and III. None of the mechanics added in this round have been played by a person yet.
+Scripted bots, Bolts only, perfect aim:
+
+- Chapters I to III: a bot that goes for the Heretic first wins in 12 to 45 seconds with two stars.
+- Chapters IV and V: a bot that goes for Inquisitors first wins in 30 to 65 seconds, usually with two stars. A bot that ignores them lost to a Crisis of Faith in all six runs. Doing nothing loses chapter IV in under a minute.
+- Dropping a Meteor on a house after herding heathens into it killed 2 to 4 at once in tests. Up to 15 were hiding at one time in chapter V.
+
+Chapters I to III have been played on an emulator and judged too easy, which is what IV and V are for. IV and V have not been played by a person yet.
 
 ## 10. Decisions log
 
@@ -177,9 +208,15 @@ A scripted bot with perfect aim, using only Bolts and going for the Heretic firs
 | 2026-11-15 | The third star needs a chain | Stops Bolt-only play from earning full marks, without making it a way to lose. |
 | 2026-11-15 | Build moved to Gradle 9.6.0, Android Gradle plugin 9.5.1, Kotlin 2.2.10 | Upgraded by Android Studio on the designer's machine. Supersedes the row above. |
 
+| 2026-11-15 | Difficulty comes from opposition, not tighter numbers | Chapters I to III were too easy because nothing on the page could beat the player and Bolt answered everything. Inquisitors attack, sheltering defeats Bolt, fatigue prices Bolt spam. |
+| 2026-11-15 | The new rules apply only from chapter IV | Keeps I to III as a gentle introduction. |
+
 ## 11. Ideas backlog
 
-- Heathens sheltering inside buildings when spooked, so flattening a full tavern is the big play.
+- Ward Totems: zones where no power works, to be knocked out from outside.
+- Reinforcement waves of ordinary heathens.
+- Prayer only near a standing holy building.
+
 
 - Heathens who build and repair rods mid-level, so the Defiant chapter fights back.
 

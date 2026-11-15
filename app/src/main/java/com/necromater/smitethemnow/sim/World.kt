@@ -1,6 +1,7 @@
 package com.necromater.smitethemnow.sim
 
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.max
@@ -81,6 +82,19 @@ class World(val level: Int = 1, seed: Long = 7L) {
         const val DEFECT_CHANCE = 0.12f
         const val DEFECT_CHANCE_WITH_HERETIC = 0.25f
 
+        /** Inquisitors: walk to a Believer, wind up, strike. A Shield stops the blow. */
+        const val STRIKE_TIME = 1.3f
+        const val MARTYR_PENALTY = 15f
+
+        /** Sheltering: a spooked heathen runs for a building this close and hides inside. */
+        const val REFUGE_RADIUS = 340f
+        const val SHELTER_TIME = 5f
+
+        /** Divine Fatigue: each Bolt in quick succession costs this much more, up to a cap. */
+        const val FATIGUE_STEP = 4f
+        const val FATIGUE_CAP = 5
+        const val FATIGUE_RECOVERY = 0.6f
+
         /** Seconds of fire against a wall before it cracks. */
         const val SCORCH_TIME = 2.5f
         const val CRUSH_MARGIN = 34f
@@ -121,6 +135,30 @@ class World(val level: Int = 1, seed: Long = 7L) {
                     "Smite the builder before he is done."
                 ),
                 4
+            ),
+            LevelInfo(
+                "The Inquisition",
+                "They have sharpened things. Guard your flock.",
+                listOf(
+                    "Inquisitors cut Believers down. A",
+                    "Shield stops the blade. So does a Bolt.",
+                    "Frightened heathens hide indoors:",
+                    "bring the building down on them.",
+                    "Bolts in a hurry cost more. Pace them."
+                ),
+                4
+            ),
+            LevelInfo(
+                "Day of Reckoning",
+                "Everything at once. Do try to keep up.",
+                listOf(
+                    "A Heretic, rods, and Inquisitors,",
+                    "with more Inquisitors on the way.",
+                    "Herd them indoors with a Meteor's glow,",
+                    "then drop the roof for a long chain.",
+                    "Your Prophet is worth a Shield."
+                ),
+                5
             )
         )
     }
@@ -180,6 +218,19 @@ class World(val level: Int = 1, seed: Long = 7L) {
     var shake = 0f
         private set
 
+    /** Divine Fatigue. Whole steps raise the price of the next Bolt. */
+    var fatigue = 0f
+        private set
+
+    /** Chapters IV and V switch these on. I to III stay as the gentle introduction. */
+    var sheltering = false
+        private set
+    var fatigueOn = false
+        private set
+
+    /** Inquisitors still to come: seconds into the round, x, y. */
+    private val arrivals = ArrayList<FloatArray>()
+
     /** Deaths waiting to be reacted to: x, y, and 1 for a heathen or 0 for a Believer. */
     private val witnessed = ArrayList<FloatArray>()
 
@@ -189,6 +240,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
         when (level) {
             0 -> buildHamlet()
             2 -> buildDefiant()
+            3 -> buildInquisition()
+            4 -> buildReckoning()
             else -> buildMarket()
         }
         timeLeft = timeLimit
@@ -226,6 +279,10 @@ class World(val level: Int = 1, seed: Long = 7L) {
         val n = Npc(x, y(yy), faction, Role.LEADER)
         if (faction == Faction.NON_BELIEVER) n.hp = 2
         place(n)
+    }
+
+    private fun inquisitor(x: Float, yy: Float) {
+        place(Npc(x, y(yy), Faction.NON_BELIEVER, Role.INQUISITOR))
     }
 
     private fun place(n: Npc) {
@@ -320,6 +377,68 @@ class World(val level: Int = 1, seed: Long = 7L) {
         barrel(330f, 740f)
     }
 
+    /** Chapter IV: Inquisitors hunt the flock, and frightened heathens hide indoors. */
+    private fun buildInquisition() {
+        timeLimit = 165f
+        sheltering = true
+        fatigueOn = true
+        building(400f, 1120f, 200f, 130f, holy = true)
+        building(120f, 330f, 210f, 130f)
+        building(660f, 420f, 210f, 130f)
+        building(140f, 760f, 170f, 120f)
+
+        group(Faction.BELIEVER, 7, 500f, 1290f, 75f)
+        leader(Faction.BELIEVER, 560f, 1300f)
+
+        group(Faction.NON_BELIEVER, 6, 240f, 520f, 80f)
+        group(Faction.NON_BELIEVER, 6, 760f, 620f, 80f)
+        group(Faction.NON_BELIEVER, 3, 300f, 940f, 60f)
+        inquisitor(480f, 160f)
+        inquisitor(900f, 240f)
+        inquisitor(80f, 620f)
+
+        // Barrels against the west house: one spark cracks it. Two blasts bring it down.
+        barrel(350f, 400f)
+        barrel(360f, 470f)
+        barrel(660f, 600f)
+    }
+
+    /** Chapter V: a Heretic, two rods, Inquisitors now and Inquisitors later. */
+    private fun buildReckoning() {
+        timeLimit = 180f
+        sheltering = true
+        fatigueOn = true
+        building(70f, 1150f, 200f, 130f, holy = true)
+        building(380f, 420f, 220f, 130f)
+        building(720f, 760f, 200f, 130f)
+        building(100f, 240f, 180f, 120f)
+        building(700f, 150f, 170f, 110f)
+
+        group(Faction.BELIEVER, 6, 230f, 1310f, 70f)
+        group(Faction.BELIEVER, 4, 800f, 1240f, 55f)
+        leader(Faction.BELIEVER, 300f, 1290f)
+
+        rod(480f, 640f)
+        rod(820f, 480f)
+
+        group(Faction.NON_BELIEVER, 6, 480f, 620f, 90f)
+        group(Faction.NON_BELIEVER, 5, 800f, 560f, 80f)
+        group(Faction.NON_BELIEVER, 4, 220f, 460f, 70f)
+        group(Faction.NON_BELIEVER, 2, 560f, 960f, 40f)
+        leader(Faction.NON_BELIEVER, 600f, 330f)
+        inquisitor(900f, 120f)
+        inquisitor(60f, 330f)
+        arrivals += floatArrayOf(40f, 500f, y(30f))
+        arrivals += floatArrayOf(85f, 960f, y(700f))
+        arrivals += floatArrayOf(85f, 40f, y(420f))
+
+        // A line that starts outside both rings and ends against the middle house.
+        barrel(180f, 700f)
+        barrel(260f, 660f)
+        barrel(340f, 620f)
+        barrel(700f, 940f)
+    }
+
     // ---------------------------------------------------------------- queries
 
     fun count(faction: Faction): Int {
@@ -328,7 +447,37 @@ class World(val level: Int = 1, seed: Long = 7L) {
         return c
     }
 
-    fun canAfford(power: Power): Boolean = prayer >= power.cost
+    /** What a power costs right now. Only the Bolt's price moves. */
+    fun costOf(power: Power): Float {
+        if (power != Power.LIGHTNING || !fatigueOn) return power.cost
+        return power.cost + FATIGUE_STEP * min(FATIGUE_CAP, ceil(fatigue).toInt())
+    }
+
+    fun canAfford(power: Power): Boolean = prayer >= costOf(power)
+
+    /** How many heathens are hiding in this building. */
+    fun occupants(b: Building): Int {
+        var c = 0
+        for (n in npcs) if (n.alive && n.inside === b) c++
+        return c
+    }
+
+    private fun doorX(b: Building): Float = b.x + b.w / 2f
+    private fun doorY(b: Building): Float = b.y + b.h + NPC_RADIUS + 6f
+
+    private fun refugeFor(n: Npc): Building? {
+        var best: Building? = null
+        var bestD = REFUGE_RADIUS * REFUGE_RADIUS
+        for (b in buildings) {
+            if (!b.standing || b.holy) continue
+            val d = dist2(n.x, n.y, doorX(b), doorY(b))
+            if (d < bestD) {
+                bestD = d
+                best = b
+            }
+        }
+        return best
+    }
 
     val flockKept: Boolean get() = believersLost == 0 && defected == 0
     val chainMade: Boolean get() = bestChain >= chainGoal
@@ -372,8 +521,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
         var best: Npc? = null
         var bestD = Float.MAX_VALUE
         for (n in npcs) {
-            if (!n.alive || n.faction != faction || n === skip) continue
-            if (followersOnly && n.isLeader) continue
+            if (!n.alive || n.faction != faction || n === skip || n.inside != null) continue
+            if (followersOnly && !n.isFollower) continue
             val d = dist2(x, y, n.x, n.y)
             if (d < bestD) {
                 bestD = d
@@ -389,6 +538,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
     fun castLightning(x: Float, y: Float): Boolean {
         if (outcome != Outcome.PLAYING) return false
         if (!spend(Power.LIGHTNING, x, y)) return false
+        if (fatigueOn) fatigue = min(FATIGUE_CAP.toFloat(), fatigue + 1f)
         shake = max(shake, 0.12f)
 
         val rod = rodCovering(x, y)
@@ -409,7 +559,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
         var best: Npc? = null
         var bestD = BOLT_RADIUS * BOLT_RADIUS
         for (n in npcs) {
-            if (!n.alive || isShielded(n)) continue
+            if (!n.alive || n.inside != null || isShielded(n)) continue
             val d = dist2(x, y, n.x, n.y)
             if (d < bestD) {
                 bestD = d
@@ -481,7 +631,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
         fx += Fx(FxKind.GUST, x1, y1, x2, y2, GUST_WIDTH, 0.55f)
 
         for (n in npcs) {
-            if (!n.alive) continue
+            if (!n.alive || n.inside != null) continue
             if (distToSegment(n.x, n.y, x1, y1, x2, y2) < GUST_WIDTH) {
                 n.pushX += ux * GUST_FORCE
                 n.pushY += uy * GUST_FORCE
@@ -507,11 +657,12 @@ class World(val level: Int = 1, seed: Long = 7L) {
     }
 
     private fun spend(power: Power, x: Float, y: Float): Boolean {
-        if (prayer < power.cost) {
+        val cost = costOf(power)
+        if (prayer < cost) {
             fx += Fx(FxKind.TEXT, x, y, x, y, 1f, 0.9f, "MORE PRAYER", false)
             return false
         }
-        prayer -= power.cost
+        prayer -= cost
         return true
     }
 
@@ -523,7 +674,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
         shake = max(shake, 0.3f)
         val r2 = radius * radius
         for (n in npcs) {
-            if (n.alive && dist2(x, y, n.x, n.y) < r2) kill(n)
+            // Anyone indoors is safe from the blast itself. The roof is another matter.
+            if (n.alive && n.inside == null && dist2(x, y, n.x, n.y) < r2) kill(n)
         }
         for (b in buildings) {
             if (!b.standing) continue
@@ -561,7 +713,10 @@ class World(val level: Int = 1, seed: Long = 7L) {
         shake = max(shake, 0.4f)
         var crushed = 0
         for (n in npcs) {
-            if (!n.alive || distToRect(n.x, n.y, b) > CRUSH_MARGIN) continue
+            if (!n.alive) continue
+            if (n.inside != null && n.inside !== b) continue
+            if (n.inside == null && distToRect(n.x, n.y, b) > CRUSH_MARGIN) continue
+            n.inside = null
             val wasHeathen = n.faction == Faction.NON_BELIEVER
             kill(n)
             if (wasHeathen && !n.alive) crushed++
@@ -593,7 +748,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
         n.fearY = fromY
     }
 
-    private fun kill(n: Npc) {
+    /** [martyr]: cut down by an Inquisitor, which you could only prevent, not cause. */
+    private fun kill(n: Npc, martyr: Boolean = false) {
         if (!n.alive || n.grace > 0f) return
         if (isShielded(n)) {
             if (n.sparedClock <= 0f) {
@@ -604,6 +760,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
         }
         n.alive = false
         n.task = null
+        n.inside = null
         if (n.faction == Faction.NON_BELIEVER) {
             chain = if (chainClock > 0f) chain + 1 else 1
             chainClock = CHAIN_WINDOW
@@ -614,13 +771,13 @@ class World(val level: Int = 1, seed: Long = 7L) {
                 prayer = min(MAX_PRAYER, prayer + 10f)
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.4f, 1.5f, "HERETIC SMITTEN", true)
                 for (o in npcs) {
-                    if (o.alive && o.faction == Faction.NON_BELIEVER) {
+                    if (o.alive && o.faction == Faction.NON_BELIEVER && o.isFollower) {
                         o.mood = Mood.SPOOKED
                         o.moodTime = 4f
                     }
                 }
             } else {
-                val label = if (chain > 1) "x$chain CHAIN" else "SMITTEN"
+                val label = if (chain > 1) "x$chain CHAIN" else if (n.isInquisitor) "INQUISITOR DOWN" else "SMITTEN"
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1f + 0.12f * min(chain, 6), 1.1f, label, true)
             }
             witnessed += floatArrayOf(n.x, n.y, 1f)
@@ -634,6 +791,9 @@ class World(val level: Int = 1, seed: Long = 7L) {
                 for (o in npcs) {
                     if (o.alive && o.faction == Faction.BELIEVER) terrify(o, n.x, n.y)
                 }
+            } else if (martyr) {
+                faith = max(0f, faith - MARTYR_PENALTY)
+                fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.3f, 1.4f, "MARTYRED", false)
             } else {
                 faith = max(0f, faith - BELIEVER_PENALTY)
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.3f, 1.4f, "DOUBT!", false)
@@ -655,7 +815,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
             val ey = e[1]
             val heathenDied = e[2] > 0.5f
             for (o in npcs) {
-                if (!o.alive) continue
+                if (!o.alive || o.inside != null) continue
                 val d = dist2(ex, ey, o.x, o.y)
                 if (heathenDied) {
                     if (o.faction == Faction.BELIEVER) {
@@ -664,7 +824,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
                             o.mood = Mood.ZEALOT
                             o.moodTime = ZEAL_TIME
                         }
-                    } else if (!o.isLeader) {
+                    } else if (o.isFollower) {
                         if (d < WITNESS_RADIUS * WITNESS_RADIUS && rng.nextFloat() < seeTheLight) {
                             convert(o, "CONVERTED")
                         } else if (d < SPOOK_RADIUS * SPOOK_RADIUS) {
@@ -727,6 +887,22 @@ class World(val level: Int = 1, seed: Long = 7L) {
             if (chainClock <= 0f) chain = 0
         }
         if (charging) charge = min(1f, charge + dt / METEOR_CHARGE_TIME)
+        if (fatigue > 0f) fatigue = max(0f, fatigue - FATIGUE_RECOVERY * dt)
+
+        var ai = arrivals.size - 1
+        while (ai >= 0) {
+            val a = arrivals[ai]
+            if (timeLimit - timeLeft >= a[0]) {
+                arrivals.removeAt(ai)
+                val n = Npc(a[1], a[2], Faction.NON_BELIEVER, Role.INQUISITOR)
+                keepInBounds(n)
+                npcs += n
+                val tx = n.x.coerceIn(260f, W - 260f)
+                val ty = n.y.coerceIn(80f, H - 80f)
+                fx += Fx(FxKind.TEXT, tx, ty, tx, ty, 1.2f, 2f, "MORE INQUISITORS", false)
+            }
+            ai--
+        }
 
         var si = shields.size - 1
         while (si >= 0) {
@@ -854,7 +1030,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
                 var best: Npc? = null
                 var bestD = 700f * 700f
                 for (n in npcs) {
-                    if (!n.alive || n.faction != Faction.NON_BELIEVER || n.isLeader || n.task != null) continue
+                    if (!n.alive || n.faction != Faction.NON_BELIEVER || !n.isFollower || n.task != null || n.inside != null) continue
                     val d = dist2(r.x, r.y, n.x, n.y)
                     if (d < bestD) {
                         bestD = d
@@ -869,7 +1045,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
                 }
                 continue
             }
-            if (b.mood != Mood.SPOOKED && dist2(r.x, r.y, b.x, b.y) < 34f * 34f) {
+            if (b.mood != Mood.SPOOKED && b.inside == null && dist2(r.x, r.y, b.x, b.y) < 34f * 34f) {
                 r.progress += dt / REBUILD_TIME
                 if (r.progress >= 1f) {
                     r.alive = true
@@ -895,6 +1071,26 @@ class World(val level: Int = 1, seed: Long = 7L) {
             if (n.moodTime > 0f) {
                 n.moodTime -= dt
                 if (n.moodTime <= 0f) n.mood = Mood.CALM
+            }
+
+            val den = n.inside
+            if (den != null) {
+                // Hiding indoors. A glowing sky nearby keeps them in a little longer.
+                if (charging && charge > NOTICE_AT &&
+                    dist2(den.x + den.w / 2f, den.y + den.h / 2f, chargeX, chargeY) < THREAT_RADIUS * THREAT_RADIUS
+                ) {
+                    n.shelterClock = max(n.shelterClock, 2f)
+                }
+                n.shelterClock -= dt
+                if (n.shelterClock <= 0f) {
+                    n.inside = null
+                    n.x = doorX(den) + (rng.nextFloat() - 0.5f) * 30f
+                    n.y = doorY(den)
+                    n.mood = Mood.CALM
+                    n.moodTime = 0f
+                    n.retarget = 0f
+                }
+                continue
             }
 
             val speed: Float
@@ -926,6 +1122,24 @@ class World(val level: Int = 1, seed: Long = 7L) {
                         fx += Fx(FxKind.ORB, n.x, n.y, n.x, n.y, 1f, 0.9f)
                     }
                 }
+            } else if (n.isInquisitor) {
+                // Straight for the Prophet if there is one, else whoever is nearest. No fear, no doubt.
+                val prey = leaderOf(Faction.BELIEVER) ?: nearest(n.x, n.y, Faction.BELIEVER, false)
+                if (prey != null) {
+                    n.targetX = prey.x
+                    n.targetY = prey.y
+                    if (dist2(n.x, n.y, prey.x, prey.y) < 34f * 34f) {
+                        n.strike += dt / STRIKE_TIME
+                        if (n.strike >= 1f) {
+                            n.strike = 0f
+                            kill(prey, true)
+                        }
+                    } else {
+                        n.strike = max(0f, n.strike - dt)
+                    }
+                }
+                stopAt = 24f
+                speed = 58f
             } else if (n.isLeader) {
                 // The Heretic walks to your flock and starts talking. He does not scare.
                 val prey = nearest(n.x, n.y, Faction.BELIEVER, true)
@@ -942,7 +1156,24 @@ class World(val level: Int = 1, seed: Long = 7L) {
                     n.moodTime = 2.5f
                 }
                 val job = n.task
-                if (n.mood == Mood.SPOOKED) {
+                val refuge = if (sheltering && n.mood == Mood.SPOOKED) refugeFor(n) else null
+                if (refuge != null) {
+                    // Somewhere to hide: through the door and out of sight.
+                    n.targetX = doorX(refuge)
+                    n.targetY = doorY(refuge)
+                    stopAt = 3f
+                    speed = 170f
+                    if (dist2(n.x, n.y, n.targetX, n.targetY) < 16f * 16f) {
+                        n.inside = refuge
+                        n.shelterClock = SHELTER_TIME
+                        n.x = refuge.x + refuge.w / 2f
+                        n.y = refuge.y + refuge.h / 2f
+                        n.pushX = 0f
+                        n.pushY = 0f
+                        n.heat = 0f
+                        continue
+                    }
+                } else if (n.mood == Mood.SPOOKED) {
                     // Human shield: hide among the faithful.
                     val shield = nearest(n.x, n.y, Faction.BELIEVER, false)
                     if (shield != null) {
@@ -998,7 +1229,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
             for (j in npcs.indices) {
                 if (j == i) continue
                 val o = npcs[j]
-                if (!o.alive) continue
+                if (!o.alive || o.inside != null) continue
                 val dx = n.x - o.x
                 val dy = n.y - o.y
                 val d = hypot(dx, dy)

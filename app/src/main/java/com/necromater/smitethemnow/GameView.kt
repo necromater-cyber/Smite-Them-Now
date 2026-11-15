@@ -278,7 +278,7 @@ class GameView(context: Context) : View(context) {
         }
 
         for (s in w.shields) drawShield(c, s.x, s.y, s.radius, min(1f, s.ttl))
-        for (b in w.buildings) drawBuilding(c, b)
+        for (b in w.buildings) drawBuilding(c, b, w.occupants(b))
 
         for (b in w.barrels) {
             if (!b.alive) continue
@@ -304,7 +304,7 @@ class GameView(context: Context) : View(context) {
                 dashedRing(c, n.x, n.y, World.HERETIC_AURA, 20)
             }
         }
-        for (n in w.npcs) if (n.alive && !n.isLeader) drawNpc(c, n)
+        for (n in w.npcs) if (n.alive && !n.isLeader && n.inside == null) drawNpc(c, n)
         for (n in w.npcs) if (n.alive && n.isLeader) drawNpc(c, n)
 
         if (w.charging) {
@@ -364,7 +364,7 @@ class GameView(context: Context) : View(context) {
         }
     }
 
-    private fun drawBuilding(c: Canvas, b: Building) {
+    private fun drawBuilding(c: Canvas, b: Building, hiding: Int) {
         if (!b.standing) {
             fill(Color.argb(70, 46, 32, 22))
             c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
@@ -409,6 +409,19 @@ class GameView(context: Context) : View(context) {
             c.drawLine(dx, b.y + 8f, dx, b.y + roofH - 8f, paint)
             c.drawLine(dx - 13f, b.y + roofH * 0.4f, dx + 13f, b.y + roofH * 0.4f, paint)
         }
+        if (hiding > 0) {
+            // Eyes in the doorway and a head count: somebody is in there.
+            fill(goldLight)
+            c.drawCircle(dx - 4.5f, b.y + b.h - 22f, 3f, paint)
+            c.drawCircle(dx + 4.5f, b.y + b.h - 22f, 3f, paint)
+            val bx = b.x + b.w - 6f
+            val by = b.y + b.h - 6f
+            fill(murrey)
+            c.drawCircle(bx, by, 22f, paint)
+            stroke(ink, 3f)
+            c.drawCircle(bx, by, 22f, paint)
+            label(c, hiding.toString(), bx, by + 10f, 30f, goldLight, Paint.Align.CENTER)
+        }
         if (b.scorch > 0f) {
             fill(Color.argb((110 * min(1f, b.scorch / World.SCORCH_TIME)).toInt(), 46, 32, 22))
             c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
@@ -431,7 +444,8 @@ class GameView(context: Context) : View(context) {
         val leader = n.isLeader
         val zealot = believer && n.mood == Mood.ZEALOT
         val terror = believer && n.mood == Mood.TERROR
-        val s = if (leader) 1.9f else 1.4f
+        val inquisitor = n.isInquisitor
+        val s = if (leader) 1.9f else if (inquisitor) 1.65f else 1.4f
         val headY = -11f
 
         c.save()
@@ -470,6 +484,19 @@ class GameView(context: Context) : View(context) {
             }
         }
 
+        if (inquisitor) {
+            // A sword that lifts as the blow winds up.
+            val lift = min(1f, n.strike)
+            val tipX = 16f + 6f * (1f - lift)
+            val tipY = -8f - 20f * lift
+            stroke(ink, 5f)
+            c.drawLine(9f, 4f, tipX, tipY, paint)
+            stroke(goldLight, 2.5f)
+            c.drawLine(9f, 4f, tipX, tipY, paint)
+            stroke(ink, 3f)
+            c.drawLine(5f, 1f, 13f, 7f, paint)
+        }
+
         // Robe.
         path.reset()
         path.moveTo(-5f, -6f)
@@ -480,7 +507,7 @@ class GameView(context: Context) : View(context) {
         val robe = if (believer) {
             if (terror) Color.rgb(150, 160, 184) else if (leader) Color.rgb(246, 238, 214) else ultramarine
         } else {
-            if (leader) ink else murrey
+            if (leader) ink else if (inquisitor) vermilion else murrey
         }
         fill(robe)
         c.drawPath(path, paint)
@@ -546,6 +573,13 @@ class GameView(context: Context) : View(context) {
         }
         c.restore()
 
+        if (n.strike > 0.03f) {
+            val top = n.y - 36f * s
+            fill(ink)
+            c.drawRect(n.x - 20f, top, n.x + 20f, top + 9f, paint)
+            fill(vermilion)
+            c.drawRect(n.x - 18f, top + 2f, n.x - 18f + 36f * min(1f, n.strike), top + 7f, paint)
+        }
         if (n.sway > 0.03f) {
             // How far the other side's preacher has got with this one.
             val top = n.y - 36f * s
@@ -781,7 +815,7 @@ class GameView(context: Context) : View(context) {
             val cx = (l + r) / 2f
             val inkNow = if (affordable) ink else Color.argb(110, 46, 32, 22)
             fitted(c, p.label, cx, t + (b - t) * 0.47f, barH * 0.27f, r - l - 34f, inkNow, true)
-            fitted(c, p.cost.toInt().toString() + " · " + p.gesture, cx, t + (b - t) * 0.8f, barH * 0.17f, r - l - 34f, if (affordable) vermilion else inkNow, false)
+            fitted(c, world.costOf(p).toInt().toString() + " · " + p.gesture, cx, t + (b - t) * 0.8f, barH * 0.17f, r - l - 34f, if (affordable) vermilion else inkNow, false)
         }
     }
 
@@ -819,7 +853,7 @@ class GameView(context: Context) : View(context) {
         paint.textSize = rest
         val restW = paint.measureText("mite Them Now")
         val startX = (w - capW - restW - 14f) / 2f + 2f
-        val baseY = h * 0.17f
+        val baseY = h * 0.155f
         fill(ultramarine)
         c.drawRect(startX - 10f, baseY - big * 0.8f, startX + capW + 6f, baseY + big * 0.08f, paint)
         stroke(ink, 3f)
@@ -833,15 +867,15 @@ class GameView(context: Context) : View(context) {
         paint.textSize = rest
         paint.color = ink
         c.drawText("mite Them Now", startX + capW + 14f, baseY, paint)
-        fitted(c, "being a Book of Petty Miracles", w / 2f, h * 0.225f, w * 0.045f, w * 0.7f, vermilion, false)
+        fitted(c, "being a Book of Petty Miracles", w / 2f, h * 0.205f, w * 0.045f, w * 0.7f, vermilion, false)
 
         val cardL = m + w * 0.06f
         val cardR = w - m - w * 0.06f
-        val cardH = h * 0.155f
-        val first = h * 0.28f
+        val cardH = h * 0.112f
+        val first = h * 0.262f
         for (i in World.LEVELS.indices) {
             val info = World.LEVELS[i]
-            val t = first + i * (cardH + h * 0.025f)
+            val t = first + i * (cardH + h * 0.012f)
             val b = t + cardH
             cardTop[i] = t
             cardBottom[i] = b
@@ -853,7 +887,7 @@ class GameView(context: Context) : View(context) {
             val roundel = cardH * 0.24f
             val rx = cardL + roundel + cardH * 0.14f
             val ry = t + cardH * 0.36f
-            fill(if (i == 2) vermilion else ultramarine)
+            fill(if (i >= 2) vermilion else ultramarine)
             c.drawCircle(rx, ry, roundel, paint)
             stroke(gold, 4f)
             c.drawCircle(rx, ry, roundel - 5f, paint)
@@ -874,7 +908,7 @@ class GameView(context: Context) : View(context) {
             c.drawText(stars(bestStars(i)), textL, t + cardH * 0.62f, paint)
             fitted(c, info.blurb, (cardL + cardR) / 2f, t + cardH * 0.87f, cardH * 0.15f, cardR - cardL - 32f, ink, false)
         }
-        fitted(c, "Tap a chapter to begin", w / 2f, h * 0.9f, w * 0.05f, w * 0.7f, vermilion, true)
+        fitted(c, "Tap a chapter to begin", w / 2f, h * 0.925f, w * 0.045f, w * 0.7f, vermilion, true)
     }
 
     private fun drawBriefing(c: Canvas) {
