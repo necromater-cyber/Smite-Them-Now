@@ -51,12 +51,21 @@ Stars: one for winning, one for losing no Believers (dead or led astray), one fo
 | IV | The Inquisition | Inquisitors, sheltering, Divine Fatigue |
 | V | Day of Reckoning | All of it, with more Inquisitors arriving mid-round |
 
+## Holy War
+
+A longer mode, about five minutes, sixth on the chapter list. It borrows from Populous.
+
+- **A rival god** earns Prayer from living heathens (the red bar under the clock) and spends it on your flock. A red crosshair on a Believer means a Bolt lands in 1.6 seconds. A red ring means a Meteor in 2.6. Shield the spot, or Gust your people out of the ring. Believers it kills cost 10 Faith each.
+- **Settlements grow.** Every finished house sends out a new follower every 16 seconds, and each side keeps founding houses on its own half of the page, up to five. Houses here take three blasts; a direct Meteor only cracks them. Foundations fall to one.
+- **Rally** (tap, 10 Prayer) plants a banner for 12 seconds. Your flock gathers there and fights any heathen in reach. About one fight in four goes the other way, at 5 Faith.
+- **Winning:** wipe out every heathen and every heathen house, or have more followers when time runs out. Stars for winning, for keeping your Prophet alive, and for finishing before the bell.
+
 ## What is in the code
 
 ```
 app/src/main/java/com/necromater/smitethemnow/
-  sim/Entities.kt   data: NPCs, buildings, barrels, fire, shields, rods, effects
-  sim/World.kt      all the rules, the three level layouts, every tuning number at the top
+  sim/Entities.kt   data: NPCs, buildings, barrels, fire, shields, rods, banners, omens, effects
+  sim/World.kt      all the rules, the level layouts, every tuning number at the top
   GameView.kt       drawing, screens and touch input
   MainActivity.kt   launches the view, handles Back
 ```

@@ -42,8 +42,7 @@ class GameView(context: Context) : View(context) {
     private val path = Path()
     private val serif: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
     private val serifBold: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
-    private val powers = Power.values()
-    private val numerals = arrayOf("I", "II", "III", "IV", "V")
+    private val numerals = arrayOf("I", "II", "III", "IV", "V", "VI")
 
     // The manuscript palette.
     private val ink = Color.rgb(46, 32, 22)
@@ -165,8 +164,9 @@ class GameView(context: Context) : View(context) {
                 }
                 Screen.PLAY -> {
                     if (sy >= height - barH) {
-                        val index = (sx / (width / powers.size.toFloat())).toInt()
-                        selected = powers[index.coerceIn(0, powers.size - 1)]
+                        val bar = world.powers
+                        val index = (sx / (width / bar.size.toFloat())).toInt()
+                        selected = bar[index.coerceIn(0, bar.size - 1)]
                         return true
                     }
                     val wx = toWorldX(sx)
@@ -174,6 +174,7 @@ class GameView(context: Context) : View(context) {
                     when (selected) {
                         Power.LIGHTNING -> world.castLightning(wx, wy)
                         Power.SHIELD -> world.castShield(wx, wy)
+                        Power.RALLY -> world.castRally(wx, wy)
                         Power.METEOR -> world.beginCharge(wx, wy)
                         Power.GUST -> {
                             dragging = true
@@ -290,6 +291,24 @@ class GameView(context: Context) : View(context) {
             c.drawCircle(b.x, b.y, 7f, paint)
         }
 
+        val ban = w.banner
+        if (ban != null) {
+            // The rally banner and the ground it claims.
+            val fade = min(1f, ban.ttl)
+            stroke(Color.argb((120 * fade).toInt(), 40, 62, 140), 3f)
+            dashedRing(c, ban.x, ban.y, World.RALLY_REACH, 30)
+            stroke(ink, 6f)
+            c.drawLine(ban.x, ban.y, ban.x, ban.y - 80f, paint)
+            path.reset()
+            path.moveTo(ban.x, ban.y - 80f)
+            path.lineTo(ban.x + 46f, ban.y - 68f + 4f * sin(clock * 6f))
+            path.lineTo(ban.x, ban.y - 52f)
+            path.close()
+            fill(ultramarine)
+            c.drawPath(path, paint)
+            stroke(gold, 3f)
+            c.drawPath(path, paint)
+        }
         for (r in w.rods) drawRod(c, r)
         for (f in w.fires) drawFire(c, f.x, f.y, f.radius, min(1f, f.ttl / 0.6f))
 
@@ -306,6 +325,29 @@ class GameView(context: Context) : View(context) {
         }
         for (n in w.npcs) if (n.alive && !n.isLeader && n.inside == null) drawNpc(c, n)
         for (n in w.npcs) if (n.alive && n.isLeader) drawNpc(c, n)
+
+        for (o in w.omens) {
+            // The rival god's aim: a red mark that closes in until the blow lands.
+            val left = (o.ttl / o.total).coerceIn(0f, 1f)
+            if (o.meteor) {
+                fill(Color.argb((50 + 90 * (1f - left)).toInt(), 120, 20, 20))
+                c.drawCircle(o.x, o.y, World.RIVAL_METEOR_RADIUS * (1f - left), paint)
+                stroke(ink, 8f)
+                c.drawCircle(o.x, o.y, World.RIVAL_METEOR_RADIUS, paint)
+                stroke(vermilion, 4f)
+                dashedRing(c, o.x, o.y, World.RIVAL_METEOR_RADIUS, 18)
+            } else {
+                val r = 26f + 44f * left
+                stroke(ink, 7f)
+                c.drawCircle(o.x, o.y, r, paint)
+                stroke(vermilion, 4f)
+                c.drawCircle(o.x, o.y, r, paint)
+                c.drawLine(o.x - r - 10f, o.y, o.x - r + 10f, o.y, paint)
+                c.drawLine(o.x + r - 10f, o.y, o.x + r + 10f, o.y, paint)
+                c.drawLine(o.x, o.y - r - 10f, o.x, o.y - r + 10f, paint)
+                c.drawLine(o.x, o.y + r - 10f, o.x, o.y + r + 10f, paint)
+            }
+        }
 
         if (w.charging) {
             val full = w.charge >= 1f
@@ -381,11 +423,24 @@ class GameView(context: Context) : View(context) {
             }
             return
         }
+        if (b.built < 1f) {
+            // Foundations and scaffolding. One blast clears it.
+            fill(Color.argb(90, 212, 192, 148))
+            c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
+            stroke(ink, 3f)
+            dashedRing(c, b.x + b.w / 2f, b.y + b.h / 2f, min(b.w, b.h) * 0.42f, 12)
+            c.drawLine(b.x, b.y + b.h, b.x + b.w, b.y + b.h, paint)
+            c.drawLine(b.x, b.y + b.h, b.x, b.y + b.h * (1f - b.built), paint)
+            c.drawLine(b.x + b.w, b.y + b.h, b.x + b.w, b.y + b.h * (1f - b.built), paint)
+            fill(if (b.owner == Faction.BELIEVER) ultramarine else vermilion)
+            c.drawRect(b.x + 8f, b.y + b.h - 14f, b.x + 8f + (b.w - 16f) * b.built, b.y + b.h - 6f, paint)
+            return
+        }
         // Flat, front-on and proud of it, like a building in a margin.
         fill(Color.rgb(240, 228, 196))
         c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
         val roofH = b.h * 0.42f
-        fill(if (b.holy) ultramarine else vermilion)
+        fill(if (b.holy || b.owner == Faction.BELIEVER) ultramarine else vermilion)
         c.drawRect(b.x, b.y, b.x + b.w, b.y + roofH, paint)
         stroke(Color.argb(110, 250, 226, 136), 2f)
         var hx = b.x + 14f
@@ -426,7 +481,7 @@ class GameView(context: Context) : View(context) {
             fill(Color.argb((110 * min(1f, b.scorch / World.SCORCH_TIME)).toInt(), 46, 32, 22))
             c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
         }
-        if (b.hp < 2) {
+        if (b.hp == 1) {
             // Cracked: one more blast and it comes down.
             stroke(ink, 4f)
             val x0 = b.x + b.w * 0.22f
@@ -577,7 +632,7 @@ class GameView(context: Context) : View(context) {
             val top = n.y - 36f * s
             fill(ink)
             c.drawRect(n.x - 20f, top, n.x + 20f, top + 9f, paint)
-            fill(vermilion)
+            fill(if (believer) goldLight else vermilion)
             c.drawRect(n.x - 18f, top + 2f, n.x - 18f + 36f * min(1f, n.strike), top + 7f, paint)
         }
         if (n.sway > 0.03f) {
@@ -776,7 +831,14 @@ class GameView(context: Context) : View(context) {
         val secs = world.timeLeft.toInt()
         val clockText = (secs / 60).toString() + ":" + (secs % 60).toString().padStart(2, '0')
         label(c, clockText, w / 2f, hudH * 0.5f, hudH * 0.4f, if (secs <= 20) Color.rgb(236, 110, 90) else vellum, Paint.Align.CENTER)
-        plain(c, world.count(Faction.NON_BELIEVER).toString() + " heathens", w / 2f, hudH * 0.84f, hudH * 0.24f, vellumDark, Paint.Align.CENTER)
+        if (world.holyWar) {
+            // Head count for both sides, and the rival god's Prayer in red underneath.
+            val tally = world.count(Faction.BELIEVER).toString() + " faithful · " + world.count(Faction.NON_BELIEVER) + " heathens"
+            plain(c, tally, w / 2f, hudH * 0.76f, hudH * 0.2f, vellumDark, Paint.Align.CENTER)
+            meter(c, w * 0.37f, hudH * 0.84f, w * 0.63f, hudH * 0.97f, world.rivalPrayer / World.MAX_PRAYER, vermilion)
+        } else {
+            plain(c, world.count(Faction.NON_BELIEVER).toString() + " heathens", w / 2f, hudH * 0.84f, hudH * 0.24f, vellumDark, Paint.Align.CENTER)
+        }
     }
 
     private fun meter(c: Canvas, l: Float, t: Float, r: Float, b: Float, frac: Float, color: Int) {
@@ -794,10 +856,11 @@ class GameView(context: Context) : View(context) {
 
     private fun drawPowerBar(c: Canvas) {
         val top = height - barH
-        val slot = width / powers.size.toFloat()
+        val bar = world.powers
+        val slot = width / bar.size.toFloat()
         val gap = slot * 0.06f
-        for (i in powers.indices) {
-            val p = powers[i]
+        for (i in bar.indices) {
+            val p = bar[i]
             val l = i * slot + gap
             val r = (i + 1) * slot - gap
             val t = top + gap
@@ -814,7 +877,7 @@ class GameView(context: Context) : View(context) {
             }
             val cx = (l + r) / 2f
             val inkNow = if (affordable) ink else Color.argb(110, 46, 32, 22)
-            fitted(c, p.label, cx, t + (b - t) * 0.47f, barH * 0.27f, r - l - 34f, inkNow, true)
+            fitted(c, p.label, cx, t + (b - t) * 0.47f, barH * 0.27f, r - l - 26f, inkNow, true)
             fitted(c, world.costOf(p).toInt().toString() + " · " + p.gesture, cx, t + (b - t) * 0.8f, barH * 0.17f, r - l - 34f, if (affordable) vermilion else inkNow, false)
         }
     }
@@ -853,7 +916,7 @@ class GameView(context: Context) : View(context) {
         paint.textSize = rest
         val restW = paint.measureText("mite Them Now")
         val startX = (w - capW - restW - 14f) / 2f + 2f
-        val baseY = h * 0.155f
+        val baseY = h * 0.15f
         fill(ultramarine)
         c.drawRect(startX - 10f, baseY - big * 0.8f, startX + capW + 6f, baseY + big * 0.08f, paint)
         stroke(ink, 3f)
@@ -867,15 +930,15 @@ class GameView(context: Context) : View(context) {
         paint.textSize = rest
         paint.color = ink
         c.drawText("mite Them Now", startX + capW + 14f, baseY, paint)
-        fitted(c, "being a Book of Petty Miracles", w / 2f, h * 0.205f, w * 0.045f, w * 0.7f, vermilion, false)
+        fitted(c, "being a Book of Petty Miracles", w / 2f, h * 0.198f, w * 0.045f, w * 0.7f, vermilion, false)
 
         val cardL = m + w * 0.06f
         val cardR = w - m - w * 0.06f
-        val cardH = h * 0.112f
-        val first = h * 0.262f
+        val cardH = h * 0.098f
+        val first = h * 0.25f
         for (i in World.LEVELS.indices) {
             val info = World.LEVELS[i]
-            val t = first + i * (cardH + h * 0.012f)
+            val t = first + i * (cardH + h * 0.009f)
             val b = t + cardH
             cardTop[i] = t
             cardBottom[i] = b
@@ -887,13 +950,13 @@ class GameView(context: Context) : View(context) {
             val roundel = cardH * 0.24f
             val rx = cardL + roundel + cardH * 0.14f
             val ry = t + cardH * 0.36f
-            fill(if (i >= 2) vermilion else ultramarine)
+            fill(if (i == World.HOLY_WAR) gold else if (i >= 2) vermilion else ultramarine)
             c.drawCircle(rx, ry, roundel, paint)
             stroke(gold, 4f)
             c.drawCircle(rx, ry, roundel - 5f, paint)
             stroke(ink, 2.5f)
             c.drawCircle(rx, ry, roundel, paint)
-            fitted(c, numerals[i], rx, ry + roundel * 0.36f, roundel * 1.05f, roundel * 1.4f, goldLight, true)
+            fitted(c, numerals[i], rx, ry + roundel * 0.36f, roundel * 1.05f, roundel * 1.4f, if (i == World.HOLY_WAR) ink else goldLight, true)
 
             val textL = rx + roundel + cardH * 0.12f
             paint.typeface = serifBold
@@ -908,7 +971,7 @@ class GameView(context: Context) : View(context) {
             c.drawText(stars(bestStars(i)), textL, t + cardH * 0.62f, paint)
             fitted(c, info.blurb, (cardL + cardR) / 2f, t + cardH * 0.87f, cardH * 0.15f, cardR - cardL - 32f, ink, false)
         }
-        fitted(c, "Tap a chapter to begin", w / 2f, h * 0.925f, w * 0.045f, w * 0.7f, vermilion, true)
+        fitted(c, "Tap a chapter to begin", w / 2f, h * 0.935f, w * 0.042f, w * 0.7f, vermilion, true)
     }
 
     private fun drawBriefing(c: Canvas) {
@@ -923,7 +986,7 @@ class GameView(context: Context) : View(context) {
         val b = h * 0.74f
         sheet(c, l, t, r, b)
         val inner = r - l - 60f
-        fitted(c, "Chapter " + numerals[level], w / 2f, t + (b - t) * 0.12f, w * 0.045f, inner, vermilion, false)
+        fitted(c, if (level == World.HOLY_WAR) "The long game" else "Chapter " + numerals[level], w / 2f, t + (b - t) * 0.12f, w * 0.045f, inner, vermilion, false)
         fitted(c, info.title, w / 2f, t + (b - t) * 0.25f, w * 0.085f, inner, ink, true)
         fitted(c, info.blurb, w / 2f, t + (b - t) * 0.35f, w * 0.04f, inner, ink, false)
         stroke(gold, 3f)
@@ -962,8 +1025,8 @@ class GameView(context: Context) : View(context) {
         fitted(c, "Believers lost " + (world.believersLost + world.defected) + "  ·  Best chain x" + world.bestChain, w / 2f, t + ph * 0.53f, w * 0.046f, inner, ink, false)
         if (won) {
             // What the second and third stars were for.
-            fitted(c, (if (world.flockKept) "★" else "☆") + " Not one Believer lost", w / 2f, t + ph * 0.63f, w * 0.044f, inner, if (world.flockKept) ink else vermilion, false)
-            fitted(c, (if (world.chainMade) "★" else "☆") + " A chain of " + world.chainGoal + " or more", w / 2f, t + ph * 0.7f, w * 0.044f, inner, if (world.chainMade) ink else vermilion, false)
+            fitted(c, (if (world.goal2Met) "★ " else "☆ ") + world.goal2Text, w / 2f, t + ph * 0.63f, w * 0.044f, inner, if (world.goal2Met) ink else vermilion, false)
+            fitted(c, (if (world.goal3Met) "★ " else "☆ ") + world.goal3Text, w / 2f, t + ph * 0.7f, w * 0.044f, inner, if (world.goal3Met) ink else vermilion, false)
         }
 
         buttons = if (won && level < World.LEVELS.size - 1) listOf("Again", "Next", "Chapters") else listOf("Again", "Chapters")

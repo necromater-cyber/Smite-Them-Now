@@ -20,7 +20,8 @@ enum class Power(val label: String, val cost: Float, val gesture: String) {
     LIGHTNING("Bolt", 12f, "tap"),
     METEOR("Meteor", 35f, "hold"),
     GUST("Gust", 8f, "swipe"),
-    SHIELD("Shield", 15f, "tap")
+    SHIELD("Shield", 15f, "tap"),
+    RALLY("Rally", 10f, "tap")
 }
 
 enum class Outcome { PLAYING, VICTORY, DEFEAT }
@@ -68,13 +69,34 @@ class Npc(var x: Float, var y: Float, var faction: Faction, val role: Role = Rol
     val isInquisitor: Boolean get() = role == Role.INQUISITOR
 }
 
-class Building(val x: Float, val y: Float, val w: Float, val h: Float, val holy: Boolean = false) {
+class Building(
+    val x: Float,
+    val y: Float,
+    val w: Float,
+    val h: Float,
+    val holy: Boolean = false,
+    /** Whose settlement this belongs to in Holy War. Null in the chapters. */
+    val owner: Faction? = null
+) {
     var standing = true
+    /** 0..1 while under construction, 1 once finished. */
+    var built = 1f
+    /** Seconds until this house sends out its next follower. */
+    var spawnClock = 0f
     /** 2 is sound, 1 is cracked, 0 is rubble. */
     var hp = 2
     /** Seconds of fire damage building up towards the next crack. */
     var scorch = 0f
 }
+
+/** A Rally banner: the flock gathers here and fights any heathen who comes close. */
+class Banner(val x: Float, val y: Float, var ttl: Float)
+
+/**
+ * A warning that the rival god is about to strike: a Bolt on [target], or a Meteor at x, y.
+ * The player has until [ttl] runs out to Shield the spot or Gust people clear.
+ */
+class Omen(val meteor: Boolean, var x: Float, var y: Float, val target: Npc?, var ttl: Float, val total: Float)
 
 /** A Miracle Shield: Believers standing inside cannot be harmed while it lasts. */
 class Shield(val x: Float, val y: Float, val radius: Float, var ttl: Float)

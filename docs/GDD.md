@@ -117,7 +117,7 @@ Chapters IV and V. Each Bolt adds one step of fatigue, and each step adds 4 Pray
 
 ## 6. Opponent types
 
-- **Rival AI God:** a tug-of-war race to smite each other's flocks.
+- **Rival AI God:** a tug-of-war race to smite each other's flocks. Built as the Holy War mode, section 6.1.
 - **Defiant Civilization (reverse tower defense):** Non-Believers build Lightning Rods, Anti-Magic Ward Totems and Inquisitors.
 - **Apocalypse / Escort:** protect migrating Believers through hostile terrain and raiders.
 
@@ -130,6 +130,33 @@ Chapters IV and V. Each Bolt adds one step of fatigue, and each step adds 4 Pray
 - Six seconds after a rod falls, the nearest idle heathen picks up a mallet and walks over. Six seconds of work raises it again. Smiting or scaring the builder stops the work, and another is sent. Each rod can be rebuilt twice.
 
 Not built yet: heathens constructing new rods, Ward Totems, Inquisitors, the Rival God and Escort modes.
+
+### 6.1 Holy War (the Populous-flavoured mode)
+
+A second mode beside the arcade chapters: about five minutes, a living map, and an opponent who does to you what you do to them. Direct smiting stays. Land sculpting is deliberately left out for now.
+
+**The rival god**
+- Earns 0.2 Prayer per second per living heathen, shown as a red bar under the clock. Fewer heathens means a weaker god.
+- Bolt (20): marks one Believer follower with a red crosshair for 1.6 seconds, then strikes. Never aimed at the Prophet.
+- Meteor (45): when four or more Believers stand close together, marks the spot with a red ring for 2.6 seconds. Kills Believers in 110 units, wrecks your buildings, spares its own people, leaves no fire.
+- Counters: a Shield stops both. Gust pushes people out of a Meteor ring. Keeping the flock spread out denies the Meteor.
+- A Believer killed by the rival costs 10 Faith; the Prophet 30.
+
+**Growing settlements**
+- Buildings belong to a side. A finished house sends out one follower every 16 seconds, up to 22 followers per side.
+- Each side founds a new house on its own half of the page (Believers every 22 seconds, heathens every 15), up to five. Building takes 7 seconds, and foundations fall to a single blast.
+- Finished houses take three steps of damage. A direct Meteor does two, so it needs a follow-up: a barrel, fire, or a second blast.
+- Destroying your own house costs 10 Faith.
+
+**Rally**
+- A fifth power, only in this mode: tap to plant a banner for 12 seconds (10 Prayer).
+- The flock gathers at the banner. Followers within 170 units fight any heathen in reach: 2.2 seconds per blow, and one blow in four kills the Believer instead (5 Faith).
+- Heathen followers who are attacked run for a house, which sets up the collapse play.
+- Fighting Believers do not pray, and a gathered flock is exactly what the rival's Meteor wants.
+
+**Winning and stars**
+- Win by leaving no heathens and no heathen houses, or by having more followers when the five minutes are up.
+- Stars: win; Prophet alive; finished before time ran out.
 
 ## 7. Meta-progression
 
@@ -186,6 +213,8 @@ Scripted bots, Bolts only, perfect aim:
 - Chapters IV and V: a bot that goes for Inquisitors first wins in 30 to 65 seconds, usually with two stars. A bot that ignores them lost to a Crisis of Faith in all six runs. Doing nothing loses chapter IV in under a minute.
 - Dropping a Meteor on a house after herding heathens into it killed 2 to 4 at once in tests. Up to 15 were hiding at one time in chapter V.
 
+Holy War, same kind of bots: doing nothing loses to a Crisis of Faith in about a minute, with heathens at 22. Bolts alone hold the line and win on numbers at the bell for two stars, but never clear the houses. A bot that shields every omen and Meteors the houses wins outright in about two minutes. A bot that also marches the flock across the page with Rally lost one run in three, mostly to its own Meteors.
+
 Chapters I to III have been played on an emulator and judged too easy, which is what IV and V are for. IV and V have not been played by a person yet.
 
 ## 10. Decisions log
@@ -211,7 +240,12 @@ Chapters I to III have been played on an emulator and judged too easy, which is 
 | 2026-11-15 | Difficulty comes from opposition, not tighter numbers | Chapters I to III were too easy because nothing on the page could beat the player and Bolt answered everything. Inquisitors attack, sheltering defeats Bolt, fatigue prices Bolt spam. |
 | 2026-11-15 | The new rules apply only from chapter IV | Keeps I to III as a gentle introduction. |
 
+| 2026-11-15 | Borrow from Populous without becoming it | Taken: a rival god, growing settlements, followers who fight. Left out: land sculpting and the slow pace. Kept as a separate five-minute mode so the arcade chapters stay short. |
+
 ## 11. Ideas backlog
+
+- Land sculpting (raise, lower, flood), if Holy War proves the mode is worth deepening.
+- The rival god using Gust and conversion, and reacting to where the player is looking.
 
 - Ward Totems: zones where no power works, to be knocked out from outside.
 - Reinforcement waves of ordinary heathens.
