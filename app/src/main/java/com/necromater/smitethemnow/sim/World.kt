@@ -1,5 +1,6 @@
 package com.necromater.smitethemnow.sim
 
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.max
@@ -969,10 +970,11 @@ class World(val level: Int = 1, seed: Long = 7L) {
 
             var vx = 0f
             var vy = 0f
-            val tdx = n.targetX - n.x
-            val tdy = n.targetY - n.y
+            steerAround(n)
+            val tdx = goalX - n.x
+            val tdy = goalY - n.y
             val td = hypot(tdx, tdy)
-            if (td > stopAt) {
+            if (td > (if (detour) 2f else stopAt)) {
                 vx = tdx / td * speed
                 vy = tdy / td * speed
             }
@@ -1014,6 +1016,99 @@ class World(val level: Int = 1, seed: Long = 7L) {
 
             if (n.heat > BURN_TIME) kill(n)
         }
+    }
+
+    // Where this NPC should head right now: its target, or a building corner on the way there.
+    private var goalX = 0f
+    private var goalY = 0f
+    private var detour = false
+
+    /**
+     * If a standing building is in the straight line to the target, aim for the corner
+     * that gives the shortest way round. Without this, people walk into walls and stay there.
+     */
+    private fun steerAround(n: Npc) {
+        goalX = n.targetX
+        goalY = n.targetY
+        detour = false
+        val inner = NPC_RADIUS - 3f
+        val outer = NPC_RADIUS + 10f
+        for (b in buildings) {
+            if (!b.standing) continue
+            // A target against or inside the wall cannot be walked round. Just press on.
+            if (n.targetX > b.x - NPC_RADIUS - 2f && n.targetX < b.x + b.w + NPC_RADIUS + 2f &&
+                n.targetY > b.y - NPC_RADIUS - 2f && n.targetY < b.y + b.h + NPC_RADIUS + 2f
+            ) continue
+            if (!crosses(n.x, n.y, n.targetX, n.targetY, b, inner)) continue
+
+            var best = Float.MAX_VALUE
+            for (k in 0 until 4) {
+                val cx = cornerX(b, k, outer)
+                val cy = cornerY(b, k, outer)
+                val reach = hypot(cx - n.x, cy - n.y)
+                // Already standing on this corner, or cannot walk straight to it.
+                if (reach < 6f || crosses(n.x, n.y, cx, cy, b, inner)) continue
+
+                // From that corner: straight to the target if possible, else via one more corner.
+                var tail = Float.MAX_VALUE
+                if (!crosses(cx, cy, n.targetX, n.targetY, b, inner)) {
+                    tail = hypot(n.targetX - cx, n.targetY - cy)
+                } else {
+                    for (j in 0 until 4) {
+                        if (j == k) continue
+                        val jx = cornerX(b, j, outer)
+                        val jy = cornerY(b, j, outer)
+                        if (crosses(cx, cy, jx, jy, b, inner) || crosses(jx, jy, n.targetX, n.targetY, b, inner)) continue
+                        tail = min(tail, hypot(jx - cx, jy - cy) + hypot(n.targetX - jx, n.targetY - jy))
+                    }
+                }
+                if (tail == Float.MAX_VALUE) continue
+                if (reach + tail < best) {
+                    best = reach + tail
+                    goalX = cx
+                    goalY = cy
+                    detour = true
+                }
+            }
+            return
+        }
+    }
+
+    private fun cornerX(b: Building, k: Int, pad: Float): Float =
+        (if (k % 2 == 0) b.x - pad else b.x + b.w + pad).coerceIn(NPC_RADIUS, W - NPC_RADIUS)
+
+    private fun cornerY(b: Building, k: Int, pad: Float): Float =
+        (if (k < 2) b.y - pad else b.y + b.h + pad).coerceIn(NPC_RADIUS, H - NPC_RADIUS)
+
+    /** Does the segment a-b pass through the building, grown by [pad] on every side? */
+    private fun crosses(ax: Float, ay: Float, bx: Float, by: Float, b: Building, pad: Float): Boolean {
+        var t0 = 0f
+        var t1 = 1f
+        val dx = bx - ax
+        val dy = by - ay
+        val left = b.x - pad
+        val right = b.x + b.w + pad
+        val top = b.y - pad
+        val bottom = b.y + b.h + pad
+        if (abs(dx) < 0.0001f) {
+            if (ax <= left || ax >= right) return false
+        } else {
+            val u0 = (left - ax) / dx
+            val u1 = (right - ax) / dx
+            t0 = max(t0, min(u0, u1))
+            t1 = min(t1, max(u0, u1))
+            if (t0 >= t1) return false
+        }
+        if (abs(dy) < 0.0001f) {
+            if (ay <= top || ay >= bottom) return false
+        } else {
+            val u0 = (top - ay) / dy
+            val u1 = (bottom - ay) / dy
+            t0 = max(t0, min(u0, u1))
+            t1 = min(t1, max(u0, u1))
+            if (t0 >= t1) return false
+        }
+        return (t1 - t0) * hypot(dx, dy) > 3f
     }
 
     private fun keepInBounds(n: Npc) {
