@@ -16,6 +16,7 @@ import com.necromater.smitethemnow.sim.Mood
 import com.necromater.smitethemnow.sim.Npc
 import com.necromater.smitethemnow.sim.Outcome
 import com.necromater.smitethemnow.sim.Power
+import com.necromater.smitethemnow.sim.Rod
 import com.necromater.smitethemnow.sim.World
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -57,9 +58,9 @@ class GameView(context: Context) : View(context) {
     private val skin = Color.rgb(236, 200, 160)
 
     // Faint stains so the page does not look like a flat fill.
-    private val blotX = FloatArray(70)
-    private val blotY = FloatArray(70)
-    private val blotR = FloatArray(70)
+    private val blotX = FloatArray(34)
+    private val blotY = FloatArray(34)
+    private val blotR = FloatArray(34)
 
     private var screen = Screen.MENU
     private var level = 0
@@ -94,14 +95,14 @@ class GameView(context: Context) : View(context) {
         for (i in blotX.indices) {
             blotX[i] = r.nextFloat() * World.W
             blotY[i] = r.nextFloat() * World.H
-            blotR[i] = 14f + r.nextFloat() * 46f
+            blotR[i] = 30f + r.nextFloat() * 70f
         }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        hudH = h * 0.085f
-        barH = h * 0.11f
+        hudH = h * 0.078f
+        barH = h * 0.1f
         val areaH = h - hudH - barH
         scale = min(w / World.W, areaH / World.H)
         originX = (w - World.W * scale) / 2f
@@ -257,7 +258,7 @@ class GameView(context: Context) : View(context) {
         val w = world
         fill(vellum)
         c.drawRect(0f, 0f, World.W, World.H, paint)
-        fill(Color.argb(26, 120, 84, 40))
+        fill(Color.argb(12, 120, 84, 40))
         for (i in blotX.indices) c.drawCircle(blotX[i], blotY[i], blotR[i], paint)
 
         // What is left of the smitten: a smudge and a small ink cross.
@@ -289,9 +290,22 @@ class GameView(context: Context) : View(context) {
             c.drawCircle(b.x, b.y, 7f, paint)
         }
 
-        for (r in w.rods) drawRod(c, r.x, r.y, r.alive, r.charges)
+        for (r in w.rods) drawRod(c, r)
         for (f in w.fires) drawFire(c, f.x, f.y, f.radius, min(1f, f.ttl / 0.6f))
-        for (n in w.npcs) if (n.alive) drawNpc(c, n)
+
+        // Each leader's reach, so you can see who is about to be talked round.
+        for (n in w.npcs) {
+            if (!n.alive || !n.isLeader) continue
+            if (n.faction == Faction.BELIEVER) {
+                stroke(Color.argb(150, 222, 174, 54), 3f)
+                dashedRing(c, n.x, n.y, World.PROPHET_AURA, 22)
+            } else {
+                stroke(Color.argb(150, 196, 52, 36), 3f)
+                dashedRing(c, n.x, n.y, World.HERETIC_AURA, 20)
+            }
+        }
+        for (n in w.npcs) if (n.alive && !n.isLeader) drawNpc(c, n)
+        for (n in w.npcs) if (n.alive && n.isLeader) drawNpc(c, n)
 
         if (w.charging) {
             val full = w.charge >= 1f
@@ -395,66 +409,150 @@ class GameView(context: Context) : View(context) {
             c.drawLine(dx, b.y + 8f, dx, b.y + roofH - 8f, paint)
             c.drawLine(dx - 13f, b.y + roofH * 0.4f, dx + 13f, b.y + roofH * 0.4f, paint)
         }
+        if (b.scorch > 0f) {
+            fill(Color.argb((110 * min(1f, b.scorch / World.SCORCH_TIME)).toInt(), 46, 32, 22))
+            c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
+        }
+        if (b.hp < 2) {
+            // Cracked: one more blast and it comes down.
+            stroke(ink, 4f)
+            val x0 = b.x + b.w * 0.22f
+            c.drawLine(x0, b.y, x0 + 14f, b.y + b.h * 0.3f, paint)
+            c.drawLine(x0 + 14f, b.y + b.h * 0.3f, x0 - 6f, b.y + b.h * 0.55f, paint)
+            c.drawLine(x0 - 6f, b.y + b.h * 0.55f, x0 + 10f, b.y + b.h, paint)
+            val x1 = b.x + b.w * 0.74f
+            c.drawLine(x1, b.y, x1 - 12f, b.y + b.h * 0.4f, paint)
+            c.drawLine(x1 - 12f, b.y + b.h * 0.4f, x1 + 8f, b.y + b.h * 0.7f, paint)
+        }
     }
 
     private fun drawNpc(c: Canvas, n: Npc) {
-        val x = n.x
-        val y = n.y
         val believer = n.faction == Faction.BELIEVER
+        val leader = n.isLeader
         val zealot = believer && n.mood == Mood.ZEALOT
         val terror = believer && n.mood == Mood.TERROR
-        val headY = y - 11f
+        val s = if (leader) 1.9f else 1.4f
+        val headY = -11f
 
-        if (zealot) {
+        c.save()
+        c.translate(n.x, n.y)
+        c.scale(s, s)
+
+        if (zealot || n.grace > 0f) {
             // Rays of unreasonable enthusiasm.
             stroke(gold, 3f)
             var k = 0
             while (k < 8) {
                 val a = k * 0.7854f + clock * 2f
-                c.drawLine(x + cos(a) * 15f, headY + sin(a) * 15f, x + cos(a) * 23f, headY + sin(a) * 23f, paint)
+                c.drawLine(cos(a) * 15f, headY + sin(a) * 15f, cos(a) * 23f, headY + sin(a) * 23f, paint)
                 k++
             }
+        }
+        if (zealot) {
             stroke(ink, 3f)
-            c.drawLine(x - 7f, y - 3f, x - 15f, y - 16f, paint)
-            c.drawLine(x + 7f, y - 3f, x + 15f, y - 16f, paint)
+            c.drawLine(-7f, -3f, -15f, -16f, paint)
+            c.drawLine(7f, -3f, 15f, -16f, paint)
+        }
+
+        // Staff: a crozier for the Prophet, a red-tipped rod for the Heretic.
+        if (leader) {
+            val sx = if (believer) 14f else -14f
+            stroke(ink, 2.5f)
+            c.drawLine(sx, 14f, sx, -20f, paint)
+            if (believer) {
+                stroke(gold, 2.5f)
+                c.drawCircle(sx - 4f, -21f, 4f, paint)
+            } else {
+                fill(vermilion)
+                c.drawCircle(sx, -23f, 4.5f, paint)
+                stroke(ink, 1.5f)
+                c.drawCircle(sx, -23f, 4.5f, paint)
+            }
         }
 
         // Robe.
         path.reset()
-        path.moveTo(x - 5f, y - 6f)
-        path.lineTo(x + 5f, y - 6f)
-        path.lineTo(x + 11f, y + 14f)
-        path.lineTo(x - 11f, y + 14f)
+        path.moveTo(-5f, -6f)
+        path.lineTo(5f, -6f)
+        path.lineTo(11f, 14f)
+        path.lineTo(-11f, 14f)
         path.close()
-        fill(if (!believer) murrey else if (terror) Color.rgb(150, 160, 184) else ultramarine)
+        val robe = if (believer) {
+            if (terror) Color.rgb(150, 160, 184) else if (leader) Color.rgb(246, 238, 214) else ultramarine
+        } else {
+            if (leader) ink else murrey
+        }
+        fill(robe)
         c.drawPath(path, paint)
         stroke(ink, 2.5f)
         c.drawPath(path, paint)
+        if (leader) {
+            stroke(if (believer) gold else vermilion, 3f)
+            c.drawLine(0f, -4f, 0f, 12f, paint)
+        }
 
         if (believer && !terror) {
             fill(if (zealot) goldLight else gold)
-            c.drawCircle(x, headY, 11f, paint)
+            c.drawCircle(0f, headY, 11f, paint)
             stroke(ink, 1.5f)
-            c.drawCircle(x, headY, 11f, paint)
+            c.drawCircle(0f, headY, 11f, paint)
         }
 
         fill(skin)
-        c.drawCircle(x, headY, 6.5f, paint)
+        c.drawCircle(0f, headY, 6.5f, paint)
         stroke(ink, 2f)
-        c.drawCircle(x, headY, 6.5f, paint)
+        c.drawCircle(0f, headY, 6.5f, paint)
 
+        if (believer && leader) {
+            // Mitre.
+            path.reset()
+            path.moveTo(-6f, headY - 4f)
+            path.lineTo(0f, headY - 19f)
+            path.lineTo(6f, headY - 4f)
+            path.close()
+            fill(goldLight)
+            c.drawPath(path, paint)
+            stroke(ink, 1.5f)
+            c.drawPath(path, paint)
+        }
         if (!believer) {
             // A pointed hood, so nobody mistakes them for the saved.
             path.reset()
-            path.moveTo(x - 8f, headY - 2f)
-            path.lineTo(x + 2f, headY - 21f)
-            path.lineTo(x + 8f, headY - 2f)
+            path.moveTo(-8f, headY - 2f)
+            path.lineTo(2f, headY - (if (leader) 27f else 21f))
+            path.lineTo(8f, headY - 2f)
             path.close()
-            fill(ink)
+            fill(if (leader) vermilion else ink)
             c.drawPath(path, paint)
-            if (n.mood == Mood.SPOOKED) {
-                label(c, "!", x + 15f, headY - 8f, 30f, vermilion, Paint.Align.CENTER)
+            if (leader) {
+                stroke(ink, 1.5f)
+                c.drawPath(path, paint)
             }
+            if (n.task != null) {
+                // Carrying a mallet: this one is off to rebuild a rod.
+                stroke(ink, 2.5f)
+                c.drawLine(9f, 4f, 17f, -8f, paint)
+                stroke(ink, 5f)
+                c.drawLine(14f, -11f, 20f, -6f, paint)
+            }
+            if (n.mood == Mood.SPOOKED) {
+                label(c, "!", 15f, headY - 8f, 26f, vermilion, Paint.Align.CENTER)
+            }
+            if (leader && n.hp > 1) {
+                // His ward: the first Bolt breaks it.
+                stroke(Color.argb(200, 196, 52, 36), 2f)
+                dashedRing(c, 0f, 0f, 24f, 10)
+            }
+        }
+        c.restore()
+
+        if (n.sway > 0.03f) {
+            // How far the other side's preacher has got with this one.
+            val top = n.y - 36f * s
+            fill(ink)
+            c.drawRect(n.x - 20f, top, n.x + 20f, top + 9f, paint)
+            fill(if (believer) vermilion else goldLight)
+            c.drawRect(n.x - 18f, top + 2f, n.x - 18f + 36f * min(1f, n.sway), top + 7f, paint)
         }
     }
 
@@ -497,12 +595,21 @@ class GameView(context: Context) : View(context) {
         dashedRing(c, x, y, radius - 14f, 24)
     }
 
-    private fun drawRod(c: Canvas, x: Float, y: Float, alive: Boolean, charges: Int) {
-        if (!alive) {
+    private fun drawRod(c: Canvas, r: Rod) {
+        val x = r.x
+        val y = r.y
+        val charges = r.charges
+        if (!r.alive) {
             stroke(ink, 6f)
             c.drawLine(x - 6f, y + 4f, x + 44f, y + 16f, paint)
             fill(ink)
             c.drawCircle(x - 6f, y + 4f, 9f, paint)
+            if (r.progress > 0f) {
+                fill(ink)
+                c.drawRect(x - 30f, y - 30f, x + 30f, y - 18f, paint)
+                fill(vermilion)
+                c.drawRect(x - 27f, y - 27f, x - 27f + 54f * min(1f, r.progress), y - 21f, paint)
+            }
             return
         }
         fill(ink)
@@ -620,7 +727,7 @@ class GameView(context: Context) : View(context) {
     private fun drawHud(c: Canvas) {
         val w = width.toFloat()
         val pad = w * 0.03f
-        val barW = w * 0.34f
+        val barW = w * 0.3f
         val barTop = hudH * 0.5f
         val barBottom = hudH * 0.82f
         val labelY = hudH * 0.38f
@@ -673,8 +780,8 @@ class GameView(context: Context) : View(context) {
             }
             val cx = (l + r) / 2f
             val inkNow = if (affordable) ink else Color.argb(110, 46, 32, 22)
-            fitted(c, p.label, cx, t + (b - t) * 0.47f, barH * 0.27f, r - l - 16f, inkNow, true)
-            fitted(c, p.cost.toInt().toString() + " · " + p.gesture, cx, t + (b - t) * 0.8f, barH * 0.17f, r - l - 16f, if (affordable) vermilion else inkNow, false)
+            fitted(c, p.label, cx, t + (b - t) * 0.47f, barH * 0.27f, r - l - 34f, inkNow, true)
+            fitted(c, p.cost.toInt().toString() + " · " + p.gesture, cx, t + (b - t) * 0.8f, barH * 0.17f, r - l - 34f, if (affordable) vermilion else inkNow, false)
         }
     }
 
@@ -711,7 +818,7 @@ class GameView(context: Context) : View(context) {
         val capW = paint.measureText("S")
         paint.textSize = rest
         val restW = paint.measureText("mite Them Now")
-        val startX = (w - capW - restW) / 2f
+        val startX = (w - capW - restW - 14f) / 2f + 2f
         val baseY = h * 0.17f
         fill(ultramarine)
         c.drawRect(startX - 10f, baseY - big * 0.8f, startX + capW + 6f, baseY + big * 0.08f, paint)
@@ -788,10 +895,10 @@ class GameView(context: Context) : View(context) {
         stroke(gold, 3f)
         c.drawLine(l + 60f, t + (b - t) * 0.41f, r - 60f, t + (b - t) * 0.41f, paint)
         for (i in info.tips.indices) {
-            fitted(c, info.tips[i], w / 2f, t + (b - t) * (0.52f + 0.085f * i), w * 0.046f, inner, ink, false)
+            fitted(c, info.tips[i], w / 2f, t + (b - t) * (0.5f + 0.078f * i), w * 0.044f, inner, ink, false)
         }
         val blink = 150 + (105 * (0.5f + 0.5f * sin(clock * 4f))).toInt()
-        fitted(c, "Tap to begin", w / 2f, t + (b - t) * 0.93f, w * 0.055f, inner, Color.argb(blink, 196, 52, 36), true)
+        fitted(c, "Tap to begin", w / 2f, t + (b - t) * 0.94f, w * 0.055f, inner, Color.argb(blink, 196, 52, 36), true)
     }
 
     private fun drawResult(c: Canvas) {
@@ -809,17 +916,21 @@ class GameView(context: Context) : View(context) {
         sheet(c, l, t, r, b)
         val inner = r - l - 60f
         val ph = b - t
-        fitted(c, if (won) "All Smitten" else "Divine Failure", w / 2f, t + ph * 0.17f, w * 0.1f, inner, if (won) ink else vermilion, true)
+        fitted(c, if (won) "All Smitten" else "Divine Failure", w / 2f, t + ph * 0.15f, w * 0.1f, inner, if (won) ink else vermilion, true)
         if (won) {
-            fitted(c, stars(world.stars()), w / 2f, t + ph * 0.34f, w * 0.13f, inner, gold, true)
+            fitted(c, stars(world.stars()), w / 2f, t + ph * 0.3f, w * 0.12f, inner, gold, true)
         } else {
-            fitted(c, world.defeatReason, w / 2f, t + ph * 0.32f, w * 0.05f, inner, ink, false)
+            fitted(c, world.defeatReason, w / 2f, t + ph * 0.28f, w * 0.05f, inner, ink, false)
         }
         stroke(gold, 3f)
-        c.drawLine(l + 60f, t + ph * 0.41f, r - 60f, t + ph * 0.41f, paint)
-        fitted(c, "Smitten: " + world.smitten, w / 2f, t + ph * 0.52f, w * 0.05f, inner, ink, false)
-        fitted(c, "Believers lost: " + world.believersLost, w / 2f, t + ph * 0.61f, w * 0.05f, inner, ink, false)
-        fitted(c, "Best chain: x" + world.bestChain, w / 2f, t + ph * 0.70f, w * 0.05f, inner, ink, false)
+        c.drawLine(l + 60f, t + ph * 0.36f, r - 60f, t + ph * 0.36f, paint)
+        fitted(c, "Smitten " + world.smitten + "  ·  Converted " + world.converted, w / 2f, t + ph * 0.45f, w * 0.046f, inner, ink, false)
+        fitted(c, "Believers lost " + (world.believersLost + world.defected) + "  ·  Best chain x" + world.bestChain, w / 2f, t + ph * 0.53f, w * 0.046f, inner, ink, false)
+        if (won) {
+            // What the second and third stars were for.
+            fitted(c, (if (world.flockKept) "★" else "☆") + " Not one Believer lost", w / 2f, t + ph * 0.63f, w * 0.044f, inner, if (world.flockKept) ink else vermilion, false)
+            fitted(c, (if (world.chainMade) "★" else "☆") + " A chain of " + world.chainGoal + " or more", w / 2f, t + ph * 0.7f, w * 0.044f, inner, if (world.chainMade) ink else vermilion, false)
+        }
 
         buttons = if (won && level < World.LEVELS.size - 1) listOf("Again", "Next", "Chapters") else listOf("Again", "Chapters")
         buttonTop = t + ph * 0.79f

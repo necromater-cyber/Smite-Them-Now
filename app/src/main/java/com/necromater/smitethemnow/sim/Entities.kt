@@ -7,6 +7,9 @@ package com.necromater.smitethemnow.sim
 
 enum class Faction { BELIEVER, NON_BELIEVER }
 
+/** A LEADER preaches: the Prophet for the Believers, the Heretic for the heathens. */
+enum class Role { FOLLOWER, LEADER }
+
 /** CALM is the default. ZEALOT and TERROR apply to Believers, SPOOKED to Non-Believers. */
 enum class Mood { CALM, ZEALOT, TERROR, SPOOKED }
 
@@ -21,12 +24,12 @@ enum class Outcome { PLAYING, VICTORY, DEFEAT }
 
 enum class FxKind { BOLT, BLAST, GUST, TEXT, ORB }
 
-class Npc(var x: Float, var y: Float, val faction: Faction) {
+class Npc(var x: Float, var y: Float, var faction: Faction, val role: Role = Role.FOLLOWER) {
     var alive = true
     var mood = Mood.CALM
     var moodTime = 0f
-    val homeX = x
-    val homeY = y
+    var homeX = x
+    var homeY = y
     var targetX = x
     var targetY = y
     var retarget = 0f
@@ -41,10 +44,25 @@ class Npc(var x: Float, var y: Float, val faction: Faction) {
     var orbClock = 0f
     /** Throttles the "SPARED" pop-up while a shielded Believer stands in harm's way. */
     var sparedClock = 0f
+    /** Bolts needed to kill. The Heretic's ward soaks up the first one. */
+    var hp = 1
+    /** 0..1: how far the other side's leader has talked this follower round. */
+    var sway = 0f
+    var preached = false
+    /** A new convert cannot be harmed for a moment, so one chain does not bless and burn them. */
+    var grace = 0f
+    /** The fallen Lightning Rod this heathen has been sent to rebuild. */
+    var task: Rod? = null
+
+    val isLeader: Boolean get() = role == Role.LEADER
 }
 
 class Building(val x: Float, val y: Float, val w: Float, val h: Float, val holy: Boolean = false) {
     var standing = true
+    /** 2 is sound, 1 is cracked, 0 is rubble. */
+    var hp = 2
+    /** Seconds of fire damage building up towards the next crack. */
+    var scorch = 0f
 }
 
 /** A Miracle Shield: Believers standing inside cannot be harmed while it lasts. */
@@ -54,10 +72,13 @@ class Shield(val x: Float, val y: Float, val radius: Float, var ttl: Float)
 class Rod(val x: Float, val y: Float) {
     var alive = true
     var charges = 0
+    /** Seconds until the heathens send someone to put it back up. */
+    var rebuildDelay = 0f
+    /** 0..1 while a builder is working on it. */
+    var progress = 0f
+    var rebuildsLeft = 2
+    var builder: Npc? = null
 }
-
-/** What the level-select screen and the briefing card show. */
-class LevelInfo(val title: String, val blurb: String, val tips: List<String>)
 
 class Barrel(val x: Float, val y: Float) {
     var alive = true
@@ -71,6 +92,9 @@ class Fire(var x: Float, var y: Float, val radius: Float, var ttl: Float) {
     var driftTime = 0f
     var trail = 0f
 }
+
+/** What the chapter list and the briefing card show, and the chain needed for the third star. */
+class LevelInfo(val title: String, val blurb: String, val tips: List<String>, val chainGoal: Int)
 
 /** A short-lived visual event. The renderer decides how each kind looks. */
 class Fx(

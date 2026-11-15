@@ -40,6 +40,21 @@ Working title. Living document: sections marked **Open** are undecided.
 - **Doubt and Terror:** Hurting a Believer makes those nearby stop praying, flee, or (later) defect.
 - **Social spread:** Isolated NPCs can be converted by a surrounding crowd. Not built yet.
 
+### 4.1 Leaders
+
+Each side has one leader per level, drawn larger than the followers, with a visible ring showing their reach.
+
+- **The Prophet** (Believers): stays with his flock. Converts the nearest Non-Believer follower inside his ring (130 units) in 5 seconds. Heathens who run to the flock as human shields are walking into his sermon. Losing him costs 50 Faith and terrifies the whole flock.
+- **The Heretic** (Non-Believers): walks to the nearest flock and leads one Believer astray every 5 seconds inside his ring (110 units), at 10 Faith each. He does not scare and cannot be converted. A ward absorbs the first Bolt; blasts and fire ignore it. Zealots, shielded Believers and fresh converts are immune to him. Killing him pays 10 Prayer and panics every heathen.
+- A bar over a follower's head shows how far they have been talked round. It drains when the preacher loses reach.
+
+### 4.2 Witness conversion
+
+- A Non-Believer follower within 170 units of a smiting has a 10% chance to convert on the spot while the Prophet lives, 5% without him. The rest are spooked as before.
+- A Believer who sees another Believer die has a 25% chance to walk away while the Heretic lives, 12% without him. The rest are terrified as before.
+- New converts cannot be harmed for 2 seconds, so the tail of a barrel chain does not bless and burn the same person.
+- Reactions are worked out once per tick, after every death in that tick.
+
 ## 5. Domino combos
 
 The map should reward setting things up over spamming the biggest spell.
@@ -69,6 +84,14 @@ Kills in quick succession form a chain. Each extra link pays more Prayer. This f
 
 **In the proof of concept:** links must land within 0.8 seconds of each other, each link adds 1 Prayer on top of the base 2, capped at 6 extra. The short window is deliberate: it rewards barrel and fire chains, and stops rapid Bolt taps from paying for themselves.
 
+### 5.5 Destructible buildings
+
+- A building is sound, cracked, or rubble. A blast near it does one step of damage. A Meteor landing on it does two.
+- Fire against a wall for 2.5 seconds does one step.
+- A collapse crushes anyone within 34 units of the walls. Crushing at least one heathen pays 5 Prayer ("Poetic Justice").
+- Flattening a holy building costs 15 Faith and terrifies nearby Believers ("Sacrilege").
+- Rubble no longer blocks movement.
+
 ## 6. Opponent types
 
 - **Rival AI God:** a tug-of-war race to smite each other's flocks.
@@ -81,8 +104,9 @@ Kills in quick succession form a chain. Each extra link pays more Prayer. This f
 - Three swallowed Bolts overload the rod. It explodes and takes nearby heathens with it.
 - A Meteor or barrel blast fells a rod at once.
 - Rods do nothing about Meteors, wind or fire.
+- Six seconds after a rod falls, the nearest idle heathen picks up a mallet and walks over. Six seconds of work raises it again. Smiting or scaring the builder stops the work, and another is sent. Each rod can be rebuilt twice.
 
-Not built yet: heathens constructing rods during play, Ward Totems, Inquisitors, the Rival God and Escort modes.
+Not built yet: heathens constructing new rods, Ward Totems, Inquisitors, the Rival God and Escort modes.
 
 ## 7. Meta-progression
 
@@ -108,28 +132,30 @@ Everything is drawn in code for now. Hand-painted assets come later.
 
 **Purpose:** find out whether tap, hold and swipe feel good on a phone, and whether human shields, Zealotry and barrel chains produce interesting decisions in a 2–3 minute round.
 
-**Scope:** three chapters chosen from a chapter list, four powers, a briefing card per chapter, win and lose cards with a star rating, best stars saved per chapter.
+**Scope:** three chapters chosen from a chapter list, four powers, a leader on each side, conversion, destructible buildings, a briefing card per chapter, win and lose cards with a star rating, best stars saved per chapter.
 
-| Chapter | Believers | Non-Believers | Barrels | Rods | Time |
-|---|---|---|---|---|---|
-| I. A Gentle Smiting | 6 | 9 | 2 | 0 | 2:00 |
-| II. Market Day | 10 | 20 | 7 | 0 | 2:30 |
-| III. The Defiant | 9 | 18 | 4 | 3 | 2:45 |
+**Stars:** one for winning, one for losing no Believers (dead or led astray), one for reaching the chapter's chain goal. A Bolt-only win earns two at most.
+
+| Chapter | Believers | Non-Believers | Barrels | Rods | Time | Chain goal |
+|---|---|---|---|---|---|---|
+| I. A Gentle Smiting | 6 + Prophet | 9 | 2 | 0 | 2:00 | 2 |
+| II. Market Day | 10 + Prophet | 19 + Heretic | 7 | 0 | 2:30 | 3 |
+| III. The Defiant | 9 + Prophet | 17 + Heretic | 4 | 3 | 2:45 | 4 |
 
 **Tuning values** (all at the top of `sim/World.kt`):
 
 | Value | Setting |
 |---|---|
-| Starting Prayer / maximum | 30 / 100 |
+| Starting Prayer / maximum | 22 / 100 |
 | Prayer per calm Believer | 0.35 per second (Zealot: double) |
 | Bolt / Meteor / Gust / Shield cost | 12 / 35 / 8 / 15 |
 | Shield radius / duration | 115 units / 6 s |
 | Rod ring / Bolts to overload | 230 units / 3 |
-| Meteor charge time | 0.9 s; Non-Believers react once it is 35% charged |
+| Meteor charge time | 0.9 s; Non-Believers react once it is 30% charged |
 | Faith lost per Believer killed | 25 of 100 |
 | Zealot duration / Terror duration | 6 s / 5 s |
 
-A scripted bot with perfect aim, using only Bolts, clears chapter I in about 30 seconds, II in 35–50 and III in 40–65. Chapter II has been played on an emulator and felt good. Chapters I and III, the Shield and the rods have not been played by a person yet.
+A scripted bot with perfect aim, using only Bolts and going for the Heretic first, clears chapter I in 12–20 seconds, II in about 30 and III in 35–40, for two stars. A slower bot that ignores the Heretic still wins but loses up to five Believers to him. Lighting the barrel line gives a chain of 3–5 on chapters II and III. None of the mechanics added in this round have been played by a person yet.
 
 ## 10. Decisions log
 
@@ -146,12 +172,18 @@ A scripted bot with perfect aim, using only Bolts, clears chapter I in about 30 
 | 2026-11-15 | Rods can be brute-forced with three Bolts | A player who has not found the clever route is slowed, not stuck. |
 | 2026-11-15 | Build on Gradle 8.14.3, Android Gradle plugin 8.13.2, Gradle JDK 21 | What the designer's Android Studio accepted. |
 
+| 2026-11-15 | The page is 1000 x 1650 units | Fills a tall phone screen. Older, squarer phones get side margins. |
+| 2026-11-15 | Leaders convert one follower at a time | A whole flock turning at once would end a round in seconds. One at a time gives the player a clock to race. |
+| 2026-11-15 | The third star needs a chain | Stops Bolt-only play from earning full marks, without making it a way to lose. |
+| 2026-11-15 | Build moved to Gradle 9.6.0, Android Gradle plugin 9.5.1, Kotlin 2.2.10 | Upgraded by Android Studio on the designer's machine. Supersedes the row above. |
+
 ## 11. Ideas backlog
+
+- Heathens sheltering inside buildings when spooked, so flattening a full tavern is the big play.
 
 - Heathens who build and repair rods mid-level, so the Defiant chapter fights back.
 
 - Pre-Smite Preview: press and hold to see the consequence before release.
 - Poetic Justice bonuses for ironic kills.
 - Dust and smoke that block the AI's line of sight.
-- Destructible buildings that matter (the proof of concept only flattens them).
 - Engine choice once the art style is set.

@@ -11,8 +11,8 @@ android {
         applicationId = "com.necromater.smitethemnow"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0-poc"
+        versionCode = 3
+        versionName = "0.3.0-poc"
     }
 
     buildTypes {
@@ -25,9 +25,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
 
-    kotlinOptions {
-        jvmTarget = "17"
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

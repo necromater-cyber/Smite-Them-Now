@@ -17,10 +17,10 @@ class World(val level: Int = 1, seed: Long = 7L) {
 
     companion object {
         const val W = 1000f
-        const val H = 1400f
+        const val H = 1650f
 
         const val MAX_PRAYER = 100f
-        const val START_PRAYER = 30f
+        const val START_PRAYER = 22f
 
         /** Prayer per second from one calm Believer. Zealots give double. */
         const val PRAYER_RATE = 0.35f
@@ -29,7 +29,11 @@ class World(val level: Int = 1, seed: Long = 7L) {
         const val CHAIN_BONUS = 1f
         const val CHAIN_BONUS_CAP = 6
         const val CHAIN_WINDOW = 0.8f
+
         const val BELIEVER_PENALTY = 25f
+        const val PROPHET_PENALTY = 50f
+        const val DEFECT_PENALTY = 10f
+        const val CHAPEL_PENALTY = 15f
 
         const val BOLT_RADIUS = 42f
         const val METEOR_RADIUS = 120f
@@ -40,14 +44,14 @@ class World(val level: Int = 1, seed: Long = 7L) {
         const val GUST_MIN_LENGTH = 60f
 
         const val THREAT_RADIUS = 300f
-        const val NOTICE_AT = 0.35f
+        const val NOTICE_AT = 0.3f
         const val SPOOK_RADIUS = 260f
         const val ZEAL_RADIUS = 110f
         const val ZEAL_TIME = 6f
         const val TERROR_RADIUS = 230f
         const val TERROR_TIME = 5f
         const val BURN_TIME = 0.3f
-        const val NPC_RADIUS = 11f
+        const val NPC_RADIUS = 13f
         const val MAX_FIRES = 60
 
         const val SHIELD_RADIUS = 115f
@@ -58,6 +62,27 @@ class World(val level: Int = 1, seed: Long = 7L) {
         /** Bolts a rod can swallow before it overloads and explodes. */
         const val ROD_CAPACITY = 3
         const val ROD_BLAST = 95f
+        const val REBUILD_DELAY = 6f
+        const val REBUILD_TIME = 6f
+
+        /** The Prophet talks one nearby heathen round at a time. */
+        const val PROPHET_AURA = 130f
+        const val PROPHET_TIME = 5f
+        /** The Heretic does the same to your flock, a little more slowly. */
+        const val HERETIC_AURA = 110f
+        const val HERETIC_TIME = 5f
+
+        /** Heathens this close to a smiting may see the light on the spot. */
+        const val WITNESS_RADIUS = 170f
+        const val WITNESS_CHANCE = 0.05f
+        const val WITNESS_CHANCE_WITH_PROPHET = 0.10f
+        /** Believers who watch one of their own die may walk away. */
+        const val DEFECT_CHANCE = 0.12f
+        const val DEFECT_CHANCE_WITH_HERETIC = 0.25f
+
+        /** Seconds of fire against a wall before it cracks. */
+        const val SCORCH_TIME = 2.5f
+        const val CRUSH_MARGIN = 34f
 
         val LEVELS: List<LevelInfo> = listOf(
             LevelInfo(
@@ -67,18 +92,22 @@ class World(val level: Int = 1, seed: Long = 7L) {
                     "Choose Bolt, then tap a heathen.",
                     "Smite one beside a Believer and",
                     "the Believer prays twice as fast.",
-                    "Lightning also sets off barrels."
-                )
+                    "Your Prophet converts any heathen",
+                    "who lingers near him. Keep him safe."
+                ),
+                2
             ),
             LevelInfo(
                 "Market Day",
-                "Crowds, oil barrels, and nowhere safe to aim.",
+                "Crowds, oil barrels, and a rival preacher.",
                 listOf(
+                    "The Heretic leads your flock astray.",
+                    "His ward eats one Bolt. Send two.",
                     "Hold Meteor until the ring is whole.",
-                    "Swipe Gust through fire to drive it.",
-                    "Heathens hide among your flock:",
-                    "Shield the flock, then let fly."
-                )
+                    "Shield the flock, then let fly.",
+                    "Blasts bring buildings down on heads."
+                ),
+                3
             ),
             LevelInfo(
                 "The Defiant",
@@ -87,8 +116,10 @@ class World(val level: Int = 1, seed: Long = 7L) {
                     "A rod swallows any Bolt in its ring.",
                     "Three Bolts overload it. Blasts",
                     "and Meteors fell it at once.",
-                    "Barrels outside a ring still spark."
-                )
+                    "They will send someone to rebuild.",
+                    "Smite the builder before he is done."
+                ),
+                4
             )
         )
     }
@@ -107,7 +138,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
     var prayer = START_PRAYER
         private set
 
-    /** Devotion. Drops when you hurt your own flock. At zero you lose. */
+    /** Devotion. Drops when you hurt or lose your own flock. At zero you lose. */
     var faith = 100f
         private set
 
@@ -128,6 +159,10 @@ class World(val level: Int = 1, seed: Long = 7L) {
         private set
     var believersLost = 0
         private set
+    var converted = 0
+        private set
+    var defected = 0
+        private set
     private var chainClock = 0f
 
     var charging = false
@@ -144,6 +179,11 @@ class World(val level: Int = 1, seed: Long = 7L) {
     var shake = 0f
         private set
 
+    /** Deaths waiting to be reacted to: x, y, and 1 for a heathen or 0 for a Believer. */
+    private val witnessed = ArrayList<FloatArray>()
+
+    val chainGoal: Int get() = LEVELS[level.coerceIn(0, LEVELS.size - 1)].chainGoal
+
     init {
         when (level) {
             0 -> buildHamlet()
@@ -153,100 +193,130 @@ class World(val level: Int = 1, seed: Long = 7L) {
         timeLeft = timeLimit
     }
 
-    // ---------------------------------------------------------------- level
+    // ---------------------------------------------------------------- levels
 
-    /** Level 0: one flock, a handful of heathens, one easy barrel pair. */
-    private fun buildHamlet() {
-        timeLimit = 120f
-        buildings += Building(110f, 960f, 200f, 130f, holy = true)
-        buildings += Building(640f, 250f, 180f, 120f)
-        buildings += Building(160f, 420f, 150f, 110f)
+    /** Layouts were drawn for a page 1400 tall. This stretches them to the real height. */
+    private fun y(v: Float): Float = v * H / 1400f
 
-        spawnGroup(Faction.BELIEVER, 6, 280f, 1200f, 70f)
-
-        spawnGroup(Faction.NON_BELIEVER, 4, 680f, 520f, 70f)
-        spawnGroup(Faction.NON_BELIEVER, 2, 380f, 700f, 40f)
-        spawnGroup(Faction.NON_BELIEVER, 1, 800f, 1000f, 20f)
-        spawnGroup(Faction.NON_BELIEVER, 1, 480f, 240f, 20f)
-        // One loiterer beside the flock: the first Zealotry lesson.
-        spawnGroup(Faction.NON_BELIEVER, 1, 400f, 1130f, 10f)
-
-        barrels += Barrel(640f, 610f)
-        barrels += Barrel(720f, 630f)
+    private fun building(x: Float, yTop: Float, w: Float, h: Float, holy: Boolean = false) {
+        buildings += Building(x, y(yTop), w, h, holy)
     }
 
-    /** Level 2: three Lightning Rods guard the heathen quarters. */
-    private fun buildDefiant() {
-        timeLimit = 165f
-        buildings += Building(60f, 110f, 190f, 110f, holy = true)
-        buildings += Building(620f, 200f, 180f, 110f)
-        buildings += Building(840f, 1060f, 130f, 120f)
-        buildings += Building(60f, 980f, 170f, 120f)
-
-        spawnGroup(Faction.BELIEVER, 4, 170f, 310f, 55f)
-        spawnGroup(Faction.BELIEVER, 5, 500f, 1150f, 65f)
-
-        rods += Rod(740f, 420f)
-        rods += Rod(300f, 760f)
-        rods += Rod(760f, 900f)
-
-        spawnGroup(Faction.NON_BELIEVER, 7, 740f, 470f, 90f)
-        spawnGroup(Faction.NON_BELIEVER, 6, 300f, 800f, 80f)
-        spawnGroup(Faction.NON_BELIEVER, 5, 760f, 930f, 80f)
-
-        // The first barrel sits just outside every ring. The last one sits next to a rod.
-        barrels += Barrel(560f, 600f)
-        barrels += Barrel(480f, 650f)
-        barrels += Barrel(400f, 700f)
-        barrels += Barrel(330f, 740f)
+    private fun barrel(x: Float, yy: Float) {
+        barrels += Barrel(x, y(yy))
     }
 
-    /** Level 1: the original market village. */
-    private fun buildMarket() {
-        timeLimit = 150f
-        buildings += Building(90f, 880f, 200f, 130f, holy = true)    // chapel
-        buildings += Building(610f, 1060f, 220f, 140f)  // tavern
-        buildings += Building(140f, 250f, 180f, 120f)   // market hall
-        buildings += Building(700f, 170f, 170f, 120f)   // shrine
-        buildings += Building(430f, 760f, 150f, 110f)   // well house
-
-        // Two flocks to protect.
-        spawnGroup(Faction.BELIEVER, 6, 230f, 1130f, 70f)
-        spawnGroup(Faction.BELIEVER, 4, 790f, 420f, 60f)
-
-        // Heathens: a tavern crowd, a market crowd and a few strays.
-        spawnGroup(Faction.NON_BELIEVER, 7, 690f, 980f, 80f)
-        spawnGroup(Faction.NON_BELIEVER, 7, 400f, 540f, 90f)
-        spawnGroup(Faction.NON_BELIEVER, 1, 500f, 920f, 20f)
-        spawnGroup(Faction.NON_BELIEVER, 1, 240f, 700f, 20f)
-        spawnGroup(Faction.NON_BELIEVER, 1, 820f, 720f, 20f)
-        spawnGroup(Faction.NON_BELIEVER, 1, 520f, 300f, 20f)
-        spawnGroup(Faction.NON_BELIEVER, 1, 880f, 1260f, 20f)
-        spawnGroup(Faction.NON_BELIEVER, 1, 120f, 120f, 20f)
-
-        // A line of oil barrels through the market: light one end, watch it run.
-        barrels += Barrel(300f, 560f)
-        barrels += Barrel(385f, 585f)
-        barrels += Barrel(470f, 610f)
-        barrels += Barrel(555f, 635f)
-        barrels += Barrel(640f, 660f)
-        // And two by the tavern, uncomfortably close to the chapel flock.
-        barrels += Barrel(560f, 1010f)
-        barrels += Barrel(520f, 1100f)
+    private fun rod(x: Float, yy: Float) {
+        rods += Rod(x, y(yy))
     }
 
-    private fun spawnGroup(faction: Faction, count: Int, cx: Float, cy: Float, spread: Float) {
+    private fun group(faction: Faction, count: Int, cx: Float, cy: Float, spread: Float) {
         for (i in 0 until count) {
             val n = Npc(
                 cx + (rng.nextFloat() - 0.5f) * 2f * spread,
-                cy + (rng.nextFloat() - 0.5f) * 2f * spread,
+                y(cy) + (rng.nextFloat() - 0.5f) * 2f * spread,
                 faction
             )
-            n.retarget = rng.nextFloat() * 2f
-            n.orbClock = rng.nextFloat()
-            keepInBounds(n)
-            npcs += n
+            place(n)
         }
+    }
+
+    private fun leader(faction: Faction, x: Float, yy: Float) {
+        val n = Npc(x, y(yy), faction, Role.LEADER)
+        if (faction == Faction.NON_BELIEVER) n.hp = 2
+        place(n)
+    }
+
+    private fun place(n: Npc) {
+        n.retarget = rng.nextFloat() * 2f
+        n.orbClock = rng.nextFloat()
+        keepInBounds(n)
+        n.homeX = n.x
+        n.homeY = n.y
+        npcs += n
+    }
+
+    /** Chapter I: one flock and its Prophet, a handful of heathens, one easy barrel pair. */
+    private fun buildHamlet() {
+        timeLimit = 120f
+        building(110f, 960f, 200f, 130f, holy = true)
+        building(640f, 250f, 180f, 120f)
+        building(160f, 420f, 150f, 110f)
+
+        group(Faction.BELIEVER, 6, 280f, 1200f, 70f)
+        leader(Faction.BELIEVER, 360f, 1130f)
+
+        group(Faction.NON_BELIEVER, 4, 680f, 520f, 70f)
+        group(Faction.NON_BELIEVER, 2, 380f, 700f, 40f)
+        group(Faction.NON_BELIEVER, 1, 800f, 1000f, 20f)
+        group(Faction.NON_BELIEVER, 1, 480f, 240f, 20f)
+        // One loiterer beside the Prophet: the first conversion lesson.
+        group(Faction.NON_BELIEVER, 1, 440f, 1110f, 10f)
+
+        barrel(640f, 610f)
+        barrel(720f, 630f)
+    }
+
+    /** Chapter II: the market village, now with a Heretic. */
+    private fun buildMarket() {
+        timeLimit = 150f
+        building(90f, 880f, 200f, 130f, holy = true)
+        building(610f, 1060f, 220f, 140f)
+        building(140f, 250f, 180f, 120f)
+        building(700f, 170f, 170f, 120f)
+        building(430f, 760f, 150f, 110f)
+
+        group(Faction.BELIEVER, 6, 230f, 1130f, 70f)
+        group(Faction.BELIEVER, 4, 790f, 420f, 60f)
+        leader(Faction.BELIEVER, 300f, 1080f)
+
+        group(Faction.NON_BELIEVER, 7, 690f, 980f, 80f)
+        group(Faction.NON_BELIEVER, 6, 400f, 540f, 90f)
+        group(Faction.NON_BELIEVER, 1, 500f, 920f, 20f)
+        group(Faction.NON_BELIEVER, 1, 240f, 700f, 20f)
+        group(Faction.NON_BELIEVER, 1, 820f, 720f, 20f)
+        group(Faction.NON_BELIEVER, 1, 520f, 300f, 20f)
+        group(Faction.NON_BELIEVER, 1, 880f, 1260f, 20f)
+        group(Faction.NON_BELIEVER, 1, 120f, 120f, 20f)
+        leader(Faction.NON_BELIEVER, 540f, 470f)
+
+        // A line of oil barrels through the market: light one end, watch it run.
+        barrel(300f, 560f)
+        barrel(385f, 585f)
+        barrel(470f, 610f)
+        barrel(555f, 635f)
+        barrel(640f, 660f)
+        // And two by the tavern, uncomfortably close to the chapel flock.
+        barrel(560f, 1010f)
+        barrel(520f, 1100f)
+    }
+
+    /** Chapter III: three Lightning Rods guard the heathen quarters, and they get rebuilt. */
+    private fun buildDefiant() {
+        timeLimit = 165f
+        building(60f, 110f, 190f, 110f, holy = true)
+        building(620f, 200f, 180f, 110f)
+        building(840f, 1060f, 130f, 120f)
+        building(60f, 980f, 170f, 120f)
+
+        group(Faction.BELIEVER, 4, 170f, 310f, 55f)
+        group(Faction.BELIEVER, 5, 500f, 1150f, 65f)
+        leader(Faction.BELIEVER, 440f, 1210f)
+
+        rod(740f, 420f)
+        rod(300f, 760f)
+        rod(760f, 900f)
+
+        group(Faction.NON_BELIEVER, 6, 740f, 470f, 90f)
+        group(Faction.NON_BELIEVER, 6, 330f, 770f, 75f)
+        group(Faction.NON_BELIEVER, 5, 760f, 930f, 80f)
+        leader(Faction.NON_BELIEVER, 800f, 500f)
+
+        // The first barrel sits just outside every ring. The last one sits next to a rod.
+        barrel(560f, 600f)
+        barrel(480f, 650f)
+        barrel(400f, 700f)
+        barrel(330f, 740f)
     }
 
     // ---------------------------------------------------------------- queries
@@ -259,11 +329,14 @@ class World(val level: Int = 1, seed: Long = 7L) {
 
     fun canAfford(power: Power): Boolean = prayer >= power.cost
 
+    val flockKept: Boolean get() = believersLost == 0 && defected == 0
+    val chainMade: Boolean get() = bestChain >= chainGoal
+
     /** 1 to 3, only meaningful after a victory. */
     fun stars(): Int {
         var s = 1
-        if (believersLost == 0) s++
-        if (timeLeft >= 60f) s++
+        if (flockKept) s++
+        if (chainMade) s++
         return s
     }
 
@@ -273,6 +346,11 @@ class World(val level: Int = 1, seed: Long = 7L) {
             if (dist2(n.x, n.y, s.x, s.y) < s.radius * s.radius) return true
         }
         return false
+    }
+
+    fun leaderOf(faction: Faction): Npc? {
+        for (n in npcs) if (n.alive && n.isLeader && n.faction == faction) return n
+        return null
     }
 
     private fun rodCovering(x: Float, y: Float): Rod? {
@@ -289,11 +367,12 @@ class World(val level: Int = 1, seed: Long = 7L) {
         return best
     }
 
-    private fun nearestBeliever(x: Float, y: Float): Npc? {
+    private fun nearest(x: Float, y: Float, faction: Faction, followersOnly: Boolean, skip: Npc? = null): Npc? {
         var best: Npc? = null
         var bestD = Float.MAX_VALUE
         for (n in npcs) {
-            if (!n.alive || n.faction != Faction.BELIEVER) continue
+            if (!n.alive || n.faction != faction || n === skip) continue
+            if (followersOnly && n.isLeader) continue
             val d = dist2(x, y, n.x, n.y)
             if (d < bestD) {
                 bestD = d
@@ -317,9 +396,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
             fx += Fx(FxKind.BOLT, rod.x, rod.y, rod.x, rod.y, 1f, 0.28f)
             rod.charges++
             if (rod.charges >= ROD_CAPACITY) {
-                rod.alive = false
-                fx += Fx(FxKind.TEXT, rod.x, rod.y, rod.x, rod.y, 1.2f, 1.2f, "OVERLOAD", true)
-                explode(rod.x, rod.y, ROD_BLAST, 45f, 2.5f)
+                fellRod(rod, "OVERLOAD")
+                explode(rod.x, rod.y, ROD_BLAST, 45f, 2.5f, false)
             } else {
                 fx += Fx(FxKind.TEXT, x, y, x, y, 1f, 0.9f, "GROUNDED", false)
             }
@@ -337,7 +415,14 @@ class World(val level: Int = 1, seed: Long = 7L) {
                 best = n
             }
         }
-        if (best != null) kill(best)
+        if (best != null) {
+            if (best.hp > 1) {
+                best.hp--
+                fx += Fx(FxKind.TEXT, best.x, best.y, best.x, best.y, 1f, 0.9f, "WARDED", false)
+            } else {
+                kill(best)
+            }
+        }
         for (b in barrels) {
             if (b.alive && dist2(x, y, b.x, b.y) < BOLT_RADIUS * BOLT_RADIUS) lightFuse(b, 0.05f)
         }
@@ -374,7 +459,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
             return
         }
         if (!spend(Power.METEOR, chargeX, chargeY)) return
-        explode(chargeX, chargeY, METEOR_RADIUS, 85f, 4.5f)
+        explode(chargeX, chargeY, METEOR_RADIUS, 85f, 4.5f, true)
         shake = max(shake, 0.5f)
     }
 
@@ -431,7 +516,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
 
     // ---------------------------------------------------------------- consequences
 
-    private fun explode(x: Float, y: Float, radius: Float, fireRadius: Float, fireTtl: Float) {
+    /** [heavy] is a Meteor: a direct hit levels a sound building in one go. */
+    private fun explode(x: Float, y: Float, radius: Float, fireRadius: Float, fireTtl: Float, heavy: Boolean) {
         fx += Fx(FxKind.BLAST, x, y, x, y, radius, 0.45f)
         shake = max(shake, 0.3f)
         val r2 = radius * radius
@@ -439,18 +525,56 @@ class World(val level: Int = 1, seed: Long = 7L) {
             if (n.alive && dist2(x, y, n.x, n.y) < r2) kill(n)
         }
         for (b in buildings) {
-            if (b.standing && distToRect(x, y, b) < radius * 0.6f) b.standing = false
+            if (!b.standing) continue
+            val d = distToRect(x, y, b)
+            if (d < radius * 0.6f) damage(b, if (heavy && d < 25f) 2 else 1)
         }
         for (b in barrels) {
             if (b.alive && dist2(x, y, b.x, b.y) < r2) lightFuse(b, 0.18f)
         }
         for (r in rods) {
-            if (r.alive && dist2(x, y, r.x, r.y) < r2) {
-                r.alive = false
-                fx += Fx(FxKind.TEXT, r.x, r.y, r.x, r.y, 1.1f, 1.1f, "ROD FELLED", true)
-            }
+            if (r.alive && dist2(x, y, r.x, r.y) < r2) fellRod(r, "ROD FELLED")
         }
         addFire(Fire(x, y, fireRadius, fireTtl))
+    }
+
+    private fun fellRod(r: Rod, label: String) {
+        r.alive = false
+        r.charges = 0
+        r.progress = 0f
+        r.rebuildDelay = REBUILD_DELAY
+        fx += Fx(FxKind.TEXT, r.x, r.y, r.x, r.y, 1.15f, 1.2f, label, true)
+    }
+
+    private fun damage(b: Building, amount: Int) {
+        if (!b.standing) return
+        b.hp -= amount
+        b.scorch = 0f
+        if (b.hp > 0) return
+
+        // Down it comes, on whoever was leaning against it.
+        b.standing = false
+        val cx = b.x + b.w / 2f
+        val cy = b.y + b.h / 2f
+        fx += Fx(FxKind.BLAST, cx, cy, cx, cy, max(b.w, b.h) * 0.75f, 0.6f)
+        shake = max(shake, 0.4f)
+        var crushed = 0
+        for (n in npcs) {
+            if (!n.alive || distToRect(n.x, n.y, b) > CRUSH_MARGIN) continue
+            val wasHeathen = n.faction == Faction.NON_BELIEVER
+            kill(n)
+            if (wasHeathen && !n.alive) crushed++
+        }
+        if (b.holy) {
+            faith = max(0f, faith - CHAPEL_PENALTY)
+            fx += Fx(FxKind.TEXT, cx, cy, cx, cy, 1.3f, 1.5f, "SACRILEGE", false)
+            for (n in npcs) {
+                if (n.alive && n.faction == Faction.BELIEVER && dist2(cx, cy, n.x, n.y) < 300f * 300f) terrify(n, cx, cy)
+            }
+        } else if (crushed > 0) {
+            prayer = min(MAX_PRAYER, prayer + 5f)
+            fx += Fx(FxKind.TEXT, cx, cy - 30f, cx, cy - 30f, 1.2f, 1.5f, "POETIC JUSTICE", true)
+        }
     }
 
     private fun lightFuse(b: Barrel, delay: Float) {
@@ -461,8 +585,15 @@ class World(val level: Int = 1, seed: Long = 7L) {
         if (fires.size < MAX_FIRES) fires += f
     }
 
+    private fun terrify(n: Npc, fromX: Float, fromY: Float) {
+        n.mood = Mood.TERROR
+        n.moodTime = TERROR_TIME
+        n.fearX = fromX
+        n.fearY = fromY
+    }
+
     private fun kill(n: Npc) {
-        if (!n.alive) return
+        if (!n.alive || n.grace > 0f) return
         if (isShielded(n)) {
             if (n.sparedClock <= 0f) {
                 n.sparedClock = 1.2f
@@ -471,46 +602,114 @@ class World(val level: Int = 1, seed: Long = 7L) {
             return
         }
         n.alive = false
+        n.task = null
         if (n.faction == Faction.NON_BELIEVER) {
             chain = if (chainClock > 0f) chain + 1 else 1
             chainClock = CHAIN_WINDOW
             bestChain = max(bestChain, chain)
             smitten++
             prayer = min(MAX_PRAYER, prayer + KILL_REWARD + CHAIN_BONUS * min(chain - 1, CHAIN_BONUS_CAP))
-            val label = if (chain > 1) "x$chain CHAIN" else "SMITTEN"
-            fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1f + 0.12f * min(chain, 6), 1.1f, label, true)
-
-            for (o in npcs) {
-                if (!o.alive) continue
-                val d = dist2(n.x, n.y, o.x, o.y)
-                if (o.faction == Faction.BELIEVER) {
-                    // A smiting right next to a Believer who came out unharmed: zealotry.
-                    if (o.mood != Mood.TERROR && d < ZEAL_RADIUS * ZEAL_RADIUS) {
-                        o.mood = Mood.ZEALOT
-                        o.moodTime = ZEAL_TIME
+            if (n.isLeader) {
+                prayer = min(MAX_PRAYER, prayer + 10f)
+                fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.4f, 1.5f, "HERETIC SMITTEN", true)
+                for (o in npcs) {
+                    if (o.alive && o.faction == Faction.NON_BELIEVER) {
+                        o.mood = Mood.SPOOKED
+                        o.moodTime = 4f
                     }
-                } else if (d < SPOOK_RADIUS * SPOOK_RADIUS) {
-                    // Witnesses run for the nearest human shield.
-                    o.mood = Mood.SPOOKED
-                    o.moodTime = 3f
                 }
+            } else {
+                val label = if (chain > 1) "x$chain CHAIN" else "SMITTEN"
+                fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1f + 0.12f * min(chain, 6), 1.1f, label, true)
             }
+            witnessed += floatArrayOf(n.x, n.y, 1f)
         } else {
             believersLost++
-            faith = max(0f, faith - BELIEVER_PENALTY)
             chain = 0
             chainClock = 0f
-            fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.3f, 1.4f, "DOUBT!", false)
+            if (n.isLeader) {
+                faith = max(0f, faith - PROPHET_PENALTY)
+                fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.4f, 1.6f, "YOUR PROPHET!", false)
+                for (o in npcs) {
+                    if (o.alive && o.faction == Faction.BELIEVER) terrify(o, n.x, n.y)
+                }
+            } else {
+                faith = max(0f, faith - BELIEVER_PENALTY)
+                fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.3f, 1.4f, "DOUBT!", false)
+            }
+            witnessed += floatArrayOf(n.x, n.y, 0f)
+        }
+    }
+
+    /**
+     * How the survivors take it. This runs once per tick, after every death in that tick,
+     * so nobody converts in the middle of the blast that is about to hit them.
+     */
+    private fun reactToDeaths() {
+        if (witnessed.isEmpty()) return
+        val seeTheLight = if (leaderOf(Faction.BELIEVER) != null) WITNESS_CHANCE_WITH_PROPHET else WITNESS_CHANCE
+        val walkAway = if (leaderOf(Faction.NON_BELIEVER) != null) DEFECT_CHANCE_WITH_HERETIC else DEFECT_CHANCE
+        for (e in witnessed) {
+            val ex = e[0]
+            val ey = e[1]
+            val heathenDied = e[2] > 0.5f
             for (o in npcs) {
-                if (!o.alive || o.faction != Faction.BELIEVER) continue
-                if (dist2(n.x, n.y, o.x, o.y) < TERROR_RADIUS * TERROR_RADIUS) {
-                    o.mood = Mood.TERROR
-                    o.moodTime = TERROR_TIME
-                    o.fearX = n.x
-                    o.fearY = n.y
+                if (!o.alive) continue
+                val d = dist2(ex, ey, o.x, o.y)
+                if (heathenDied) {
+                    if (o.faction == Faction.BELIEVER) {
+                        // A smiting right next to a Believer who came out unharmed: zealotry.
+                        if (o.mood != Mood.TERROR && d < ZEAL_RADIUS * ZEAL_RADIUS) {
+                            o.mood = Mood.ZEALOT
+                            o.moodTime = ZEAL_TIME
+                        }
+                    } else if (!o.isLeader) {
+                        if (d < WITNESS_RADIUS * WITNESS_RADIUS && rng.nextFloat() < seeTheLight) {
+                            convert(o, "CONVERTED")
+                        } else if (d < SPOOK_RADIUS * SPOOK_RADIUS) {
+                            // The rest run for the nearest human shield.
+                            o.mood = Mood.SPOOKED
+                            o.moodTime = 3f
+                        }
+                    }
+                } else if (o.faction == Faction.BELIEVER && d < TERROR_RADIUS * TERROR_RADIUS) {
+                    if (!o.isLeader && !isShielded(o) && rng.nextFloat() < walkAway) {
+                        defect(o, "LOST TO DOUBT", 0f)
+                    } else {
+                        terrify(o, ex, ey)
+                    }
                 }
             }
         }
+        witnessed.clear()
+    }
+
+    private fun convert(n: Npc, label: String) {
+        n.faction = Faction.BELIEVER
+        n.mood = Mood.CALM
+        n.moodTime = 0f
+        n.sway = 0f
+        n.task = null
+        n.grace = 2f
+        n.retarget = 0f
+        // Join the nearest flock.
+        val friend = nearest(n.x, n.y, Faction.BELIEVER, false, n)
+        n.homeX = friend?.homeX ?: n.x
+        n.homeY = friend?.homeY ?: n.y
+        converted++
+        prayer = min(MAX_PRAYER, prayer + 3f)
+        fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.05f, 1.3f, label, true)
+    }
+
+    private fun defect(n: Npc, label: String, faithCost: Float) {
+        n.faction = Faction.NON_BELIEVER
+        n.mood = Mood.CALM
+        n.moodTime = 0f
+        n.sway = 0f
+        n.retarget = 0f
+        defected++
+        faith = max(0f, faith - faithCost)
+        fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.05f, 1.3f, label, false)
     }
 
     // ---------------------------------------------------------------- tick
@@ -536,7 +735,10 @@ class World(val level: Int = 1, seed: Long = 7L) {
         }
         updateBarrels(dt)
         updateFires(dt)
+        updatePreaching(dt)
+        updateRods(dt)
         updateNpcs(dt)
+        reactToDeaths()
         prayer = min(MAX_PRAYER, prayer)
         checkOutcome()
     }
@@ -558,7 +760,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
             b.fuse -= dt
             if (b.fuse <= 0f) {
                 b.alive = false
-                explode(b.x, b.y, BARREL_RADIUS, 70f, 3.5f)
+                explode(b.x, b.y, BARREL_RADIUS, 70f, 3.5f, false)
             }
         }
     }
@@ -585,11 +787,100 @@ class World(val level: Int = 1, seed: Long = 7L) {
                 val reach = f.radius + 10f
                 if (b.alive && dist2(f.x, f.y, b.x, b.y) < reach * reach) lightFuse(b, 0.25f)
             }
+            for (b in buildings) {
+                // Fire against a wall cracks it, then brings it down.
+                if (b.standing && distToRect(f.x, f.y, b) < f.radius * 0.5f) {
+                    b.scorch += dt
+                    if (b.scorch >= SCORCH_TIME) damage(b, 1)
+                }
+            }
             if (f.ttl <= 0f) fires.removeAt(i)
             i--
         }
         val list = spawned
         if (list != null) for (f in list) addFire(f)
+    }
+
+    /** Each leader works on the nearest follower of the other side within reach. */
+    private fun updatePreaching(dt: Float) {
+        for (n in npcs) n.preached = false
+
+        val prophet = leaderOf(Faction.BELIEVER)
+        if (prophet != null && prophet.mood != Mood.TERROR) {
+            val t = nearest(prophet.x, prophet.y, Faction.NON_BELIEVER, true)
+            if (t != null && dist2(prophet.x, prophet.y, t.x, t.y) < PROPHET_AURA * PROPHET_AURA) {
+                t.preached = true
+                t.sway += dt / PROPHET_TIME
+                if (t.sway >= 1f) convert(t, "CONVERTED")
+            }
+        }
+
+        val heretic = leaderOf(Faction.NON_BELIEVER)
+        if (heretic != null) {
+            var t: Npc? = null
+            var bestD = HERETIC_AURA * HERETIC_AURA
+            for (n in npcs) {
+                // Zealots and the shielded are not listening.
+                if (!n.alive || n.faction != Faction.BELIEVER || n.isLeader) continue
+                if (n.mood == Mood.ZEALOT || n.grace > 0f || isShielded(n)) continue
+                val d = dist2(heretic.x, heretic.y, n.x, n.y)
+                if (d < bestD) {
+                    bestD = d
+                    t = n
+                }
+            }
+            if (t != null) {
+                t.preached = true
+                t.sway += dt / HERETIC_TIME
+                if (t.sway >= 1f) defect(t, "LED ASTRAY", DEFECT_PENALTY)
+            }
+        }
+
+        for (n in npcs) {
+            if (!n.preached && n.sway > 0f) n.sway = max(0f, n.sway - dt * 0.5f)
+        }
+    }
+
+    /** Fallen rods get rebuilt: after a pause, the nearest idle heathen walks over and sets to work. */
+    private fun updateRods(dt: Float) {
+        for (r in rods) {
+            if (r.alive || r.rebuildsLeft <= 0) continue
+            val b = r.builder
+            if (b == null || !b.alive || b.faction != Faction.NON_BELIEVER || b.task !== r) {
+                r.builder = null
+                r.rebuildDelay -= dt
+                if (r.rebuildDelay > 0f) continue
+                var best: Npc? = null
+                var bestD = 700f * 700f
+                for (n in npcs) {
+                    if (!n.alive || n.faction != Faction.NON_BELIEVER || n.isLeader || n.task != null) continue
+                    val d = dist2(r.x, r.y, n.x, n.y)
+                    if (d < bestD) {
+                        bestD = d
+                        best = n
+                    }
+                }
+                if (best == null) {
+                    r.rebuildDelay = 2f
+                } else {
+                    best.task = r
+                    r.builder = best
+                }
+                continue
+            }
+            if (b.mood != Mood.SPOOKED && dist2(r.x, r.y, b.x, b.y) < 34f * 34f) {
+                r.progress += dt / REBUILD_TIME
+                if (r.progress >= 1f) {
+                    r.alive = true
+                    r.charges = 0
+                    r.progress = 0f
+                    r.rebuildsLeft--
+                    r.builder = null
+                    b.task = null
+                    fx += Fx(FxKind.TEXT, r.x, r.y, r.x, r.y, 1.15f, 1.3f, "ROD RAISED", false)
+                }
+            }
+        }
     }
 
     private fun updateNpcs(dt: Float) {
@@ -599,12 +890,14 @@ class World(val level: Int = 1, seed: Long = 7L) {
             if (!n.alive) continue
 
             if (n.sparedClock > 0f) n.sparedClock -= dt
+            if (n.grace > 0f) n.grace -= dt
             if (n.moodTime > 0f) {
                 n.moodTime -= dt
                 if (n.moodTime <= 0f) n.mood = Mood.CALM
             }
 
             val speed: Float
+            var stopAt = 5f
             if (n.faction == Faction.BELIEVER) {
                 if (n.mood == Mood.TERROR) {
                     // Run away from whatever just happened. No praying while panicking.
@@ -613,15 +906,17 @@ class World(val level: Int = 1, seed: Long = 7L) {
                     val d = max(1f, hypot(dx, dy))
                     n.targetX = n.x + dx / d * 120f
                     n.targetY = n.y + dy / d * 120f
-                    speed = 150f
+                    speed = if (n.isLeader) 110f else 150f
                 } else {
                     n.retarget -= dt
                     if (n.retarget <= 0f) {
+                        val roam = if (n.isLeader) 50f else 90f
                         n.retarget = 1.5f + rng.nextFloat() * 2.5f
-                        n.targetX = n.homeX + (rng.nextFloat() - 0.5f) * 90f
-                        n.targetY = n.homeY + (rng.nextFloat() - 0.5f) * 90f
+                        n.targetX = n.homeX + (rng.nextFloat() - 0.5f) * roam
+                        n.targetY = n.homeY + (rng.nextFloat() - 0.5f) * roam
                     }
-                    speed = 32f
+                    // New converts hurry to their flock, then settle.
+                    speed = if (dist2(n.x, n.y, n.homeX, n.homeY) > 150f * 150f) 90f else 32f
                     val rate = PRAYER_RATE * (if (n.mood == Mood.ZEALOT) 2f else 1f)
                     prayer += rate * dt
                     n.orbClock += rate * dt
@@ -630,21 +925,38 @@ class World(val level: Int = 1, seed: Long = 7L) {
                         fx += Fx(FxKind.ORB, n.x, n.y, n.x, n.y, 1f, 0.9f)
                     }
                 }
+            } else if (n.isLeader) {
+                // The Heretic walks to your flock and starts talking. He does not scare.
+                val prey = nearest(n.x, n.y, Faction.BELIEVER, true)
+                if (prey != null) {
+                    n.targetX = prey.x
+                    n.targetY = prey.y
+                }
+                stopAt = 70f
+                speed = 38f
             } else {
                 // They take a moment to notice the sky glowing, then they run.
                 if (charging && charge > NOTICE_AT && dist2(n.x, n.y, chargeX, chargeY) < THREAT_RADIUS * THREAT_RADIUS) {
                     n.mood = Mood.SPOOKED
                     n.moodTime = 2.5f
                 }
+                val job = n.task
                 if (n.mood == Mood.SPOOKED) {
                     // Human shield: hide among the faithful.
-                    val shield = nearestBeliever(n.x, n.y)
+                    val shield = nearest(n.x, n.y, Faction.BELIEVER, false)
                     if (shield != null) {
                         n.targetX = shield.x
                         n.targetY = shield.y
                     }
+                    stopAt = 22f
                     speed = 170f
+                } else if (job != null && !job.alive) {
+                    n.targetX = job.x
+                    n.targetY = job.y + 18f
+                    stopAt = 8f
+                    speed = 75f
                 } else {
+                    if (job != null) n.task = null
                     n.retarget -= dt
                     if (n.retarget <= 0f) {
                         n.retarget = 2f + rng.nextFloat() * 3f
@@ -660,7 +972,6 @@ class World(val level: Int = 1, seed: Long = 7L) {
             val tdx = n.targetX - n.x
             val tdy = n.targetY - n.y
             val td = hypot(tdx, tdy)
-            val stopAt = if (n.mood == Mood.SPOOKED) 20f else 5f
             if (td > stopAt) {
                 vx = tdx / td * speed
                 vy = tdy / td * speed
@@ -735,12 +1046,12 @@ class World(val level: Int = 1, seed: Long = 7L) {
         val heathens = count(Faction.NON_BELIEVER)
         val flock = count(Faction.BELIEVER)
         when {
+            faith <= 0f -> lose("Crisis of Faith")
+            flock == 0 -> lose("Nobody left to worship you")
             heathens == 0 -> {
                 outcome = Outcome.VICTORY
                 charging = false
             }
-            faith <= 0f -> lose("Crisis of Faith")
-            flock == 0 -> lose("Nobody left to worship you")
             timeLeft <= 0f -> lose("They stopped paying attention")
         }
     }

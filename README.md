@@ -10,10 +10,9 @@ This repo holds the design docs and a playable proof of concept.
 ## Run the proof of concept
 
 1. Open this folder in Android Studio (**File > Open**).
-2. Set the Gradle JDK to 17 or 21 under **Settings > Build, Execution, Deployment > Build Tools > Gradle**. Gradle 8.14.3 does not run on Java 25.
-3. Let Gradle sync, then press **Run** with an emulator or a phone attached. A real phone is better: the point of this build is to feel the gestures.
+2. Let Gradle sync, then press **Run** with an emulator or a phone attached. A real phone is better: the point of this build is to feel the gestures.
 
-Build setup: Gradle 8.14.3, Android Gradle plugin 8.13.2, Kotlin 2.0.21, Android SDK platform 35. The app runs on Android 7.0 and up.
+Build setup: Gradle 9.6.0, Android Gradle plugin 9.5.1, Kotlin 2.2.10, Gradle JDK 21, Android SDK platform 35. The app runs on Android 7.0 and up.
 
 ## How to play
 
@@ -31,17 +30,21 @@ Pick a power on the bottom bar, then use its gesture on the page.
 - Smite a heathen right next to an unharmed Believer and that Believer turns **Zealot**: double Prayer for 6 seconds.
 - Kill a Believer and the ones nearby panic and stop praying for 5 seconds.
 - **Barrels** explode when struck or burned, and set off their neighbours. Kills in quick succession build a chain, and each link pays more Prayer.
-- **Lightning Rods** swallow any Bolt cast inside their ring. Three Bolts overload a rod and it explodes. A Meteor or barrel blast fells it at once.
+- **Lightning Rods** swallow any Bolt cast inside their ring. Three Bolts overload a rod and it explodes. A Meteor or barrel blast fells it at once. A heathen with a mallet will come to rebuild it, up to twice per rod.
+- **Your Prophet** (white robe, mitre) converts the nearest heathen inside his ring in 5 seconds. Lose him and Faith drops by 50.
+- **The Heretic** (black robe, red hood) walks to your flock and leads Believers astray one at a time, 5 seconds each, 10 Faith each. His ward eats the first Bolt. Zealots and shielded Believers ignore him.
+- **Witnesses:** heathens who see a smiting up close may convert on the spot. Believers who see one of their own die may walk away.
+- **Buildings** crack on the first blast and collapse on the second, crushing anyone against the walls. A direct Meteor levels one outright. Fire against a wall does the same, slowly. Flattening your own chapel costs 15 Faith.
 
-Three stars for winning with no Believers lost and a minute to spare. Your best result per chapter is saved.
+Stars: one for winning, one for losing no Believers (dead or led astray), one for a chain of the length the chapter asks for. Your best result per chapter is saved.
 
 ## Chapters
 
 | | Title | What it teaches |
 |---|---|---|
-| I | A Gentle Smiting | Bolt, Zealotry, a first barrel pair |
-| II | Market Day | Meteor, Gust, Shield, human shields, a barrel line |
-| III | The Defiant | Lightning Rods |
+| I | A Gentle Smiting | Bolt, Zealotry, the Prophet, a first barrel pair |
+| II | Market Day | The Heretic, Meteor, Gust, Shield, human shields, a barrel line |
+| III | The Defiant | Lightning Rods and the builders who put them back |
 
 ## What is in the code
 
