@@ -154,9 +154,36 @@ A second mode beside the arcade chapters: about five minutes, a living map, and 
 - Heathen followers who are attacked run for a house, which sets up the collapse play.
 - Fighting Believers do not pray, and a gathered flock is exactly what the rival's Meteor wants.
 
+**The rival answers your defences**
+- Gust (12): if you Shield a Believer it has marked, it blows them out from under the Shield and delays the Bolt to land afterwards. It also blows a flock gathered at a banner back towards home. Shown as a red arrow for 1.1 seconds. At most once every 11 seconds.
+- Ward (15): if you charge a Meteor over one of its finished houses, it may frame the house in red for 5 seconds, during which your damage does nothing. At most once every 12 seconds. The answer is to release early (free) or retarget.
+- Taunts when it kills someone, at most one every 7 seconds.
+- The red bar has notches at 20 and 45 so the player can read what it can afford next.
+
+Design intent: every defence the player buys can be made to cost twice, and every attack can be wasted. Playtesting found the fun in this mode is the budget, so the rival is built to pressure the budget.
+
+**Doctrines** (the meta-progression from section 7, first version)
+
+| Doctrine | Effect |
+|---|---|
+| Benevolent Shepherd | Shield 9, Prophet converts in 3 s, Meteor 45 |
+| Wrathful | Meteor 25, Bolt 10, all Faith losses x1.5 |
+| Trickster | Gust 4 and 40% stronger, chain bonus doubled with a cap of 10 links |
+
+**Maps**
+- Two Hills: open ground.
+- The Ford: an impassable river with one crossing and barrels on it.
+- Walled Town: destructible stone walls around the heathen quarter, one gate.
+
+**Armageddon**
+- When the five minutes run out, sheltering, building, spawning, conversion and prayer all stop. Both flocks walk at the nearest enemy and trade blows every 1.4 seconds: 60% to kill, 80% for a leader, 85% for a Zealot.
+- Deaths in the battle cost no Faith. Shields still work, and so does every other power, on whatever Prayer is left.
+- The rival stops earning Prayer too.
+- Last flock standing wins. After 60 seconds the larger flock wins.
+
 **Winning and stars**
-- Win by leaving no heathens and no heathen houses, or by having more followers when the five minutes are up.
-- Stars: win; Prophet alive; finished before time ran out.
+- Win by leaving no heathens and no heathen houses, or by winning Armageddon.
+- Stars: win; Prophet alive; won before Armageddon.
 
 ## 7. Meta-progression
 
@@ -213,6 +240,8 @@ Scripted bots, Bolts only, perfect aim:
 - Chapters IV and V: a bot that goes for Inquisitors first wins in 30 to 65 seconds, usually with two stars. A bot that ignores them lost to a Crisis of Faith in all six runs. Doing nothing loses chapter IV in under a minute.
 - Dropping a Meteor on a house after herding heathens into it killed 2 to 4 at once in tests. Up to 15 were hiding at one time in chapter V.
 
+Holy War after the second round of changes, on all three maps: doing nothing still loses in about a minute. A bot that only shields every warning reaches Armageddon at 22 against 22 and won all nine of its runs, with between 3 and 18 Believers left, in 12 to 28 seconds of battle. A bot that also Meteors the houses wins before Armageddon in 75 to 125 seconds with any doctrine. The earlier figures:
+
 Holy War, same kind of bots: doing nothing loses to a Crisis of Faith in about a minute, with heathens at 22. Bolts alone hold the line and win on numbers at the bell for two stars, but never clear the houses. A bot that shields every omen and Meteors the houses wins outright in about two minutes. A bot that also marches the flock across the page with Rally lost one run in three, mostly to its own Meteors.
 
 Chapters I to III have been played on an emulator and judged too easy, which is what IV and V are for. IV and V have not been played by a person yet.
@@ -241,6 +270,9 @@ Chapters I to III have been played on an emulator and judged too easy, which is 
 | 2026-11-15 | The new rules apply only from chapter IV | Keeps I to III as a gentle introduction. |
 
 | 2026-11-15 | Borrow from Populous without becoming it | Taken: a rival god, growing settlements, followers who fight. Left out: land sculpting and the slow pace. Kept as a separate five-minute mode so the arcade chapters stay short. |
+
+| 2026-11-15 | Holy War is the core of the game; the chapters are its tutorial | The designer found Holy War far more engaging, specifically the tension of splitting Prayer between attack and defence. |
+| 2026-11-15 | Matches end in Armageddon, not a head count | A battle decided by saved Prayer rewards the budgeting that the mode is about. |
 
 ## 11. Ideas backlog
 

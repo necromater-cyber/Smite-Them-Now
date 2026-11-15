@@ -15,7 +15,13 @@ import kotlin.random.Random
  * Coordinates are logical units (W x H), top-down, y pointing down the screen.
  * The view scales this to whatever phone it runs on.
  */
-class World(val level: Int = 1, seed: Long = 7L) {
+class World(
+    val level: Int = 1,
+    seed: Long = 7L,
+    val doctrine: Doctrine = Doctrine.NONE,
+    /** Which Holy War map: 0 Two Hills, 1 The Ford, 2 Walled Town. */
+    val map: Int = 0
+) {
 
     companion object {
         const val W = 1000f
@@ -103,6 +109,12 @@ class World(val level: Int = 1, seed: Long = 7L) {
         const val RIVAL_METEOR_WARNING = 2.6f
         const val RIVAL_METEOR_RADIUS = 110f
         const val RIVAL_KILL_PENALTY = 10f
+        /** It answers your defences: a Gust to empty a Shield or a Rally, a ward to save a house. */
+        const val RIVAL_GUST_COST = 12f
+        const val RIVAL_GUST_WARNING = 1.1f
+        const val RIVAL_WARD_COST = 15f
+        const val RIVAL_WARD_TIME = 5f
+        val TAUNTS = listOf("TOO SLOW", "MINE NOW", "YOUR GOD NAPS", "WAS THAT YOURS?", "PRAY HARDER", "HOW CARELESS")
 
         /** Holy War: settlements grow. */
         const val BUILD_INTERVAL = 22f
@@ -126,6 +138,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
         private const val BY_BLADE = 1
         private const val BY_RIVAL = 2
         private const val BY_BATTLE = 3
+        private const val BY_ARMAGEDDON = 4
 
         const val HOLY_WAR = 5
 
@@ -202,7 +215,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
                     "you: Shield the spot or Gust them clear.",
                     "Houses breed followers. Raze theirs.",
                     "Rally plants a banner: your flock fights.",
-                    "Most followers when time is up wins."
+                    "When time is up: Armageddon."
                 ),
                 0
             )
@@ -267,6 +280,14 @@ class World(val level: Int = 1, seed: Long = 7L) {
     /** Holy War only. */
     var holyWar = false
         private set
+
+    /** When the five minutes are up, everyone marches out and settles it by hand. */
+    var armageddon = false
+        private set
+    private var armageddonClock = 0f
+    private var wardCooldown = 6f
+    private var rivalGustCooldown = 8f
+    private var tauntClock = 0f
     var rivalPrayer = 0f
         private set
     val omens = ArrayList<Omen>()
@@ -510,27 +531,64 @@ class World(val level: Int = 1, seed: Long = 7L) {
         holyWar = true
         sheltering = true
         fatigueOn = true
+
+        // Your side is the same on every map.
         buildings += Building(400f, y(1150f), 200f, 130f, true, Faction.BELIEVER)
         buildings += Building(120f, y(1060f), 170f, 115f, false, Faction.BELIEVER)
-        buildings += Building(380f, y(130f), 210f, 130f, false, Faction.NON_BELIEVER)
-        buildings += Building(720f, y(250f), 170f, 115f, false, Faction.NON_BELIEVER)
-        buildings += Building(90f, y(300f), 170f, 115f, false, Faction.NON_BELIEVER)
+        group(Faction.BELIEVER, 7, 480f, 1300f, 80f)
+
+        when (map) {
+            1 -> {
+                // The Ford: a river across the middle with one crossing.
+                buildings += Building(0f, y(690f), 380f, 70f, false, null, Building.WATER)
+                buildings += Building(620f, y(690f), 380f, 70f, false, null, Building.WATER)
+                buildings += Building(380f, y(130f), 210f, 130f, false, Faction.NON_BELIEVER)
+                buildings += Building(720f, y(250f), 170f, 115f, false, Faction.NON_BELIEVER)
+                buildings += Building(90f, y(300f), 170f, 115f, false, Faction.NON_BELIEVER)
+                group(Faction.NON_BELIEVER, 5, 480f, 330f, 80f)
+                group(Faction.NON_BELIEVER, 4, 780f, 430f, 70f)
+                group(Faction.NON_BELIEVER, 2, 180f, 480f, 50f)
+                // Barrels on the crossing: whoever is on it when they go up does not finish crossing.
+                barrel(450f, 705f)
+                barrel(550f, 735f)
+                barrel(300f, 360f)
+            }
+            2 -> {
+                // Walled Town: the heathens sit behind stone with one gate. Stone can be broken.
+                buildings += Building(140f, y(80f), 36f, y(480f), false, null, Building.WALL)
+                buildings += Building(824f, y(80f), 36f, y(480f), false, null, Building.WALL)
+                buildings += Building(140f, y(560f), 270f, 36f, false, null, Building.WALL)
+                buildings += Building(590f, y(560f), 270f, 36f, false, null, Building.WALL)
+                buildings += Building(400f, y(120f), 200f, 125f, false, Faction.NON_BELIEVER)
+                buildings += Building(600f, y(340f), 170f, 115f, false, Faction.NON_BELIEVER)
+                buildings += Building(230f, y(330f), 170f, 115f, false, Faction.NON_BELIEVER)
+                group(Faction.NON_BELIEVER, 5, 500f, 300f, 70f)
+                group(Faction.NON_BELIEVER, 4, 680f, 500f, 50f)
+                group(Faction.NON_BELIEVER, 2, 300f, 490f, 40f)
+                barrel(500f, 640f)
+                barrel(900f, 400f)
+                barrel(100f, 300f)
+            }
+            else -> {
+                // Two Hills: open ground and a barrel line down the middle.
+                buildings += Building(380f, y(130f), 210f, 130f, false, Faction.NON_BELIEVER)
+                buildings += Building(720f, y(250f), 170f, 115f, false, Faction.NON_BELIEVER)
+                buildings += Building(90f, y(300f), 170f, 115f, false, Faction.NON_BELIEVER)
+                group(Faction.NON_BELIEVER, 5, 480f, 330f, 80f)
+                group(Faction.NON_BELIEVER, 4, 780f, 430f, 70f)
+                group(Faction.NON_BELIEVER, 2, 180f, 480f, 50f)
+                barrel(420f, 640f)
+                barrel(500f, 680f)
+                barrel(580f, 720f)
+                barrel(200f, 520f)
+            }
+        }
+        leader(Faction.BELIEVER, 540f, 1310f)
         for (b in buildings) {
+            if (b.owner == null) continue
             b.hp = HOUSE_HP
             b.spawnClock = SPAWN_INTERVAL * (0.5f + rng.nextFloat() * 0.5f)
         }
-
-        group(Faction.BELIEVER, 7, 480f, 1300f, 80f)
-        leader(Faction.BELIEVER, 540f, 1310f)
-
-        group(Faction.NON_BELIEVER, 5, 480f, 330f, 80f)
-        group(Faction.NON_BELIEVER, 4, 780f, 430f, 70f)
-        group(Faction.NON_BELIEVER, 2, 180f, 480f, 50f)
-
-        barrel(420f, 640f)
-        barrel(500f, 680f)
-        barrel(580f, 720f)
-        barrel(200f, 520f)
     }
 
     // ---------------------------------------------------------------- queries
@@ -541,10 +599,23 @@ class World(val level: Int = 1, seed: Long = 7L) {
         return c
     }
 
-    /** What a power costs right now. Only the Bolt's price moves. */
+    /** What a power costs right now: the doctrine sets the base, fatigue adds to the Bolt. */
     fun costOf(power: Power): Float {
-        if (power != Power.LIGHTNING || !fatigueOn) return power.cost
-        return power.cost + FATIGUE_STEP * min(FATIGUE_CAP, ceil(fatigue).toInt())
+        var base = power.cost
+        when (doctrine) {
+            Doctrine.SHEPHERD -> {
+                if (power == Power.SHIELD) base = 9f
+                if (power == Power.METEOR) base = 45f
+            }
+            Doctrine.WRATHFUL -> {
+                if (power == Power.METEOR) base = 25f
+                if (power == Power.LIGHTNING) base = 10f
+            }
+            Doctrine.TRICKSTER -> if (power == Power.GUST) base = 4f
+            Doctrine.NONE -> {}
+        }
+        if (power != Power.LIGHTNING || !fatigueOn) return base
+        return base + FATIGUE_STEP * min(FATIGUE_CAP, ceil(fatigue).toInt())
     }
 
     fun canAfford(power: Power): Boolean = prayer >= costOf(power)
@@ -563,7 +634,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
         var best: Building? = null
         var bestD = REFUGE_RADIUS * REFUGE_RADIUS
         for (b in buildings) {
-            if (!b.standing || b.holy || b.owner == Faction.BELIEVER || b.built < 1f) continue
+            if (!b.standing || b.holy || b.kind != Building.HOUSE || b.owner == Faction.BELIEVER || b.built < 1f) continue
             val d = dist2(n.x, n.y, doorX(b), doorY(b))
             if (d < bestD) {
                 bestD = d
@@ -578,9 +649,9 @@ class World(val level: Int = 1, seed: Long = 7L) {
 
     // The second and third stars, and how the result card describes them.
     val goal2Met: Boolean get() = if (holyWar) leaderOf(Faction.BELIEVER) != null else flockKept
-    val goal3Met: Boolean get() = if (holyWar) timeLeft > 0f else chainMade
+    val goal3Met: Boolean get() = if (holyWar) !armageddon else chainMade
     val goal2Text: String get() = if (holyWar) "Your Prophet lives" else "Not one Believer lost"
-    val goal3Text: String get() = if (holyWar) "Wiped out before the bell" else "A chain of $chainGoal or more"
+    val goal3Text: String get() = if (holyWar) "Won before Armageddon" else "A chain of $chainGoal or more"
 
     /** 1 to 3, only meaningful after a victory. */
     fun stars(): Int {
@@ -739,8 +810,9 @@ class World(val level: Int = 1, seed: Long = 7L) {
         for (n in npcs) {
             if (!n.alive || n.inside != null) continue
             if (distToSegment(n.x, n.y, x1, y1, x2, y2) < GUST_WIDTH) {
-                n.pushX += ux * GUST_FORCE
-                n.pushY += uy * GUST_FORCE
+                val force = if (doctrine == Doctrine.TRICKSTER) GUST_FORCE * 1.4f else GUST_FORCE
+                n.pushX += ux * force
+                n.pushY += uy * force
             }
         }
         for (f in fires) {
@@ -815,7 +887,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
     }
 
     private fun damage(b: Building, amount: Int, rival: Boolean = false) {
-        if (!b.standing) return
+        if (!b.standing || b.kind == Building.WATER) return
+        if (b.ward > 0f && !rival) return
         b.hp -= amount
         b.scorch = 0f
         if (b.hp > 0) return
@@ -838,10 +911,10 @@ class World(val level: Int = 1, seed: Long = 7L) {
             if (wasHeathen && !n.alive) crushed++
         }
         if (b.owner == Faction.BELIEVER && !b.holy) {
-            if (!rival) faith = max(0f, faith - 10f)
+            if (!rival) loseFaith(10f)
             fx += Fx(FxKind.TEXT, cx, cy, cx, cy, 1.2f, 1.5f, if (rival) "HOUSE LOST" else "YOUR OWN HOUSE", false)
         } else if (b.holy) {
-            faith = max(0f, faith - (if (rival) 10f else CHAPEL_PENALTY))
+            loseFaith((if (rival) 10f else CHAPEL_PENALTY))
             fx += Fx(FxKind.TEXT, cx, cy, cx, cy, 1.3f, 1.5f, if (rival) "CHAPEL LOST" else "SACRILEGE", false)
             for (n in npcs) {
                 if (n.alive && n.faction == Faction.BELIEVER && dist2(cx, cy, n.x, n.y) < 300f * 300f) terrify(n, cx, cy)
@@ -850,6 +923,11 @@ class World(val level: Int = 1, seed: Long = 7L) {
             prayer = min(MAX_PRAYER, prayer + 5f)
             fx += Fx(FxKind.TEXT, cx, cy - 30f, cx, cy - 30f, 1.2f, 1.5f, "POETIC JUSTICE", true)
         }
+    }
+
+    /** Every Faith loss goes through here so a doctrine can scale it. */
+    private fun loseFaith(amount: Float) {
+        faith = max(0f, faith - amount * (if (doctrine == Doctrine.WRATHFUL) 1.5f else 1f))
     }
 
     private fun lightFuse(b: Barrel, delay: Float) {
@@ -885,7 +963,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
             chainClock = CHAIN_WINDOW
             bestChain = max(bestChain, chain)
             smitten++
-            prayer = min(MAX_PRAYER, prayer + KILL_REWARD + CHAIN_BONUS * min(chain - 1, CHAIN_BONUS_CAP))
+            val chainPay = if (doctrine == Doctrine.TRICKSTER) 2f * min(chain - 1, 10) else CHAIN_BONUS * min(chain - 1, CHAIN_BONUS_CAP)
+            prayer = min(MAX_PRAYER, prayer + KILL_REWARD + chainPay)
             if (n.isLeader) {
                 prayer = min(MAX_PRAYER, prayer + 10f)
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.4f, 1.5f, "HERETIC SMITTEN", true)
@@ -904,23 +983,26 @@ class World(val level: Int = 1, seed: Long = 7L) {
             believersLost++
             chain = 0
             chainClock = 0f
-            if (n.isLeader) {
-                faith = max(0f, faith - (if (cause == BY_RIVAL) 30f else PROPHET_PENALTY))
+            if (cause == BY_ARMAGEDDON) {
+                // The last battle costs lives, not Faith.
+                fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1f, 1.1f, "FELL", false)
+            } else if (n.isLeader) {
+                loseFaith((if (cause == BY_RIVAL) 30f else PROPHET_PENALTY))
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.4f, 1.6f, "YOUR PROPHET!", false)
                 for (o in npcs) {
                     if (o.alive && o.faction == Faction.BELIEVER) terrify(o, n.x, n.y)
                 }
             } else if (cause == BY_BLADE) {
-                faith = max(0f, faith - MARTYR_PENALTY)
+                loseFaith(MARTYR_PENALTY)
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.3f, 1.4f, "MARTYRED", false)
             } else if (cause == BY_RIVAL) {
-                faith = max(0f, faith - RIVAL_KILL_PENALTY)
+                loseFaith(RIVAL_KILL_PENALTY)
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.3f, 1.4f, "STRUCK DOWN", false)
             } else if (cause == BY_BATTLE) {
-                faith = max(0f, faith - BATTLE_PENALTY)
+                loseFaith(BATTLE_PENALTY)
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.1f, 1.3f, "FELL IN BATTLE", false)
             } else {
-                faith = max(0f, faith - BELIEVER_PENALTY)
+                loseFaith(BELIEVER_PENALTY)
                 fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.3f, 1.4f, "DOUBT!", false)
             }
             witnessed += floatArrayOf(n.x, n.y, 0f)
@@ -932,6 +1014,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
      * so nobody converts in the middle of the blast that is about to hit them.
      */
     private fun reactToDeaths() {
+        if (armageddon) witnessed.clear()
         if (witnessed.isEmpty()) return
         val seeTheLight = if (leaderOf(Faction.BELIEVER) != null) WITNESS_CHANCE_WITH_PROPHET else WITNESS_CHANCE
         val walkAway = if (leaderOf(Faction.NON_BELIEVER) != null) DEFECT_CHANCE_WITH_HERETIC else DEFECT_CHANCE
@@ -994,7 +1077,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
         n.sway = 0f
         n.retarget = 0f
         defected++
-        faith = max(0f, faith - faithCost)
+        loseFaith(faithCost)
         fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 1.05f, 1.3f, label, false)
     }
 
@@ -1007,6 +1090,8 @@ class World(val level: Int = 1, seed: Long = 7L) {
         if (outcome != Outcome.PLAYING) return
 
         timeLeft = max(0f, timeLeft - dt)
+        if (holyWar && timeLeft <= 0f && !armageddon) startArmageddon()
+        if (armageddon) armageddonClock += dt
         if (chainClock > 0f) {
             chainClock -= dt
             if (chainClock <= 0f) chain = 0
@@ -1112,8 +1197,56 @@ class World(val level: Int = 1, seed: Long = 7L) {
         if (list != null) for (f in list) addFire(f)
     }
 
+    /** Time is up. Everyone comes out, the houses stop mattering, and both flocks charge. */
+    private fun startArmageddon() {
+        armageddon = true
+        sheltering = false
+        banner = null
+        for (n in npcs) {
+            if (!n.alive) continue
+            val den = n.inside
+            if (den != null) {
+                n.inside = null
+                n.x = doorX(den) + (rng.nextFloat() - 0.5f) * 40f
+                n.y = doorY(den)
+            }
+            n.mood = Mood.CALM
+            n.moodTime = 0f
+            n.task = null
+            n.strike = 0f
+        }
+        fx += Fx(FxKind.TEXT, W / 2f, H * 0.45f, W / 2f, H * 0.45f, 2.2f, 3.5f, "ARMAGEDDON", true)
+        shake = max(shake, 0.6f)
+    }
+
+    /**
+     * Armageddon: head for the nearest enemy and trade blows. Zealots and leaders hit harder.
+     * Nobody prays, so the Prayer each god saved is all there is left to spend.
+     */
+    private fun brawl(n: Npc, dt: Float): Boolean {
+        val enemy = if (n.faction == Faction.BELIEVER) Faction.NON_BELIEVER else Faction.BELIEVER
+        val foe = nearest(n.x, n.y, enemy, false) ?: return false
+        n.targetX = foe.x
+        n.targetY = foe.y
+        if (dist2(n.x, n.y, foe.x, foe.y) < 34f * 34f) {
+            n.strike += dt / 1.4f
+            if (n.strike >= 1f) {
+                n.strike = 0f
+                val odds = if (n.mood == Mood.ZEALOT) 0.85f else if (n.isLeader) 0.8f else 0.6f
+                if (rng.nextFloat() < odds) {
+                    if (foe.hp > 1) foe.hp-- else kill(foe, BY_ARMAGEDDON)
+                }
+            }
+        } else {
+            n.strike = max(0f, n.strike - dt)
+        }
+        return true
+    }
+
     /** Holy War: finished houses send out followers, and each side keeps building more. */
     private fun updateSettlements(dt: Float) {
+        for (b in buildings) if (b.ward > 0f) b.ward -= dt
+        if (armageddon) return
         for (i in buildings.indices) {
             val b = buildings[i]
             val owner = b.owner
@@ -1186,7 +1319,25 @@ class World(val level: Int = 1, seed: Long = 7L) {
     private fun updateRival(dt: Float) {
         var souls = 0
         for (n in npcs) if (n.alive && n.faction == Faction.NON_BELIEVER) souls++
-        rivalPrayer = min(MAX_PRAYER, rivalPrayer + RIVAL_RATE * souls * dt)
+        if (!armageddon) rivalPrayer = min(MAX_PRAYER, rivalPrayer + RIVAL_RATE * souls * dt)
+        if (tauntClock > 0f) tauntClock -= dt
+        wardCooldown -= dt
+        rivalGustCooldown -= dt
+
+        // You are charging a Meteor over one of its houses: it may throw a ward over the roof.
+        if (charging && charge > NOTICE_AT && wardCooldown <= 0f && rivalPrayer >= RIVAL_WARD_COST) {
+            for (b in buildings) {
+                if (!b.standing || b.owner != Faction.NON_BELIEVER || b.built < 1f || b.ward > 0f) continue
+                if (distToRect(chargeX, chargeY, b) < METEOR_RADIUS * 0.6f) {
+                    b.ward = RIVAL_WARD_TIME
+                    rivalPrayer -= RIVAL_WARD_COST
+                    wardCooldown = 12f
+                    val cx = b.x + b.w / 2f
+                    fx += Fx(FxKind.TEXT, cx, b.y, cx, b.y, 1.1f, 1.2f, "WARDED", false)
+                    break
+                }
+            }
+        }
 
         var i = omens.size - 1
         while (i >= 0) {
@@ -1204,12 +1355,28 @@ class World(val level: Int = 1, seed: Long = 7L) {
             o.ttl -= dt
             if (o.ttl <= 0f) {
                 omens.removeAt(i)
+                val lostBefore = believersLost
                 if (o.meteor) {
                     rivalBlast(o.x, o.y)
+                } else if (o.gust) {
+                    // Blows your people out of wherever you put them.
+                    fx += Fx(FxKind.GUST, o.x - o.dx * 110f, o.y - o.dy * 110f, o.x + o.dx * 110f, o.y + o.dy * 110f, GUST_WIDTH, 0.55f)
+                    for (n in npcs) {
+                        if (!n.alive || n.inside != null || n.faction != Faction.BELIEVER) continue
+                        if (dist2(o.x, o.y, n.x, n.y) < 130f * 130f) {
+                            n.pushX += o.dx * 560f
+                            n.pushY += o.dy * 560f
+                        }
+                    }
                 } else if (t != null) {
                     fx += Fx(FxKind.BOLT, t.x, t.y, t.x, t.y, 1f, 0.28f, "", false)
                     shake = max(shake, 0.12f)
                     kill(t, BY_RIVAL)
+                }
+                if (believersLost > lostBefore && tauntClock <= 0f) {
+                    tauntClock = 7f
+                    val line = TAUNTS[rng.nextInt(TAUNTS.size)]
+                    fx += Fx(FxKind.TEXT, W / 2f, 150f, W / 2f, 150f, 1.25f, 2.2f, line, false)
                 }
             }
             i--
@@ -1218,8 +1385,52 @@ class World(val level: Int = 1, seed: Long = 7L) {
         rivalThink -= dt
         if (rivalThink > 0f) return
         rivalThink = 0.8f + rng.nextFloat() * 0.9f
-        if (omens.size >= 2 || souls == 0) return
+        if (omens.size >= 3 || souls == 0) return
 
+        if (rivalGustCooldown <= 0f && rivalPrayer >= RIVAL_GUST_COST) {
+            // A marked Believer you have shielded: blow them out from under it, then strike.
+            for (o in omens) {
+                val t = o.target ?: continue
+                if (o.kind != Omen.BOLT || !isShielded(t)) continue
+                var sx = t.x
+                var sy = t.y + 1f
+                for (sh in shields) if (dist2(t.x, t.y, sh.x, sh.y) < sh.radius * sh.radius) {
+                    sx = sh.x
+                    sy = sh.y
+                }
+                var dx = t.x - sx
+                var dy = t.y - sy
+                val d = hypot(dx, dy)
+                if (d < 1f) {
+                    dx = 1f
+                    dy = 0f
+                } else {
+                    dx /= d
+                    dy /= d
+                }
+                rivalPrayer -= RIVAL_GUST_COST
+                rivalGustCooldown = 11f
+                o.ttl += RIVAL_GUST_WARNING + 0.5f
+                omens += Omen(Omen.GUST, t.x, t.y, null, RIVAL_GUST_WARNING, RIVAL_GUST_WARNING, dx, dy)
+                return
+            }
+            // A flock gathered at a banner: send it home.
+            val ban = banner
+            if (ban != null) {
+                var gathered = 0
+                for (n in npcs) {
+                    if (n.alive && n.faction == Faction.BELIEVER && dist2(ban.x, ban.y, n.x, n.y) < 130f * 130f) gathered++
+                }
+                if (gathered >= 3) {
+                    rivalPrayer -= RIVAL_GUST_COST
+                    rivalGustCooldown = 11f
+                    omens += Omen(Omen.GUST, ban.x, ban.y, null, RIVAL_GUST_WARNING, RIVAL_GUST_WARNING, 0f, 1f)
+                    return
+                }
+            }
+        }
+
+        if (omens.size >= 2) return
         if (rivalPrayer >= RIVAL_METEOR_COST) {
             // Look for a knot of at least four Believers.
             var bestN: Npc? = null
@@ -1237,7 +1448,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
             }
             if (bestN != null) {
                 rivalPrayer -= RIVAL_METEOR_COST
-                omens += Omen(true, bestN.x, bestN.y, null, RIVAL_METEOR_WARNING, RIVAL_METEOR_WARNING)
+                omens += Omen(Omen.METEOR, bestN.x, bestN.y, null, RIVAL_METEOR_WARNING, RIVAL_METEOR_WARNING)
                 return
             }
         }
@@ -1252,7 +1463,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
             if (pool.isNotEmpty()) {
                 val victim = pool[rng.nextInt(pool.size)]
                 rivalPrayer -= RIVAL_BOLT_COST
-                omens += Omen(false, victim.x, victim.y, victim, RIVAL_BOLT_WARNING, RIVAL_BOLT_WARNING)
+                omens += Omen(Omen.BOLT, victim.x, victim.y, victim, RIVAL_BOLT_WARNING, RIVAL_BOLT_WARNING)
             }
         }
     }
@@ -1286,7 +1497,7 @@ class World(val level: Int = 1, seed: Long = 7L) {
             val t = nearest(prophet.x, prophet.y, Faction.NON_BELIEVER, true)
             if (t != null && dist2(prophet.x, prophet.y, t.x, t.y) < PROPHET_AURA * PROPHET_AURA) {
                 t.preached = true
-                t.sway += dt / PROPHET_TIME
+                t.sway += dt / (if (doctrine == Doctrine.SHEPHERD) 3f else PROPHET_TIME)
                 if (t.sway >= 1f) convert(t, "CONVERTED")
             }
         }
@@ -1394,7 +1605,10 @@ class World(val level: Int = 1, seed: Long = 7L) {
 
             val speed: Float
             var stopAt = 5f
-            if (n.faction == Faction.BELIEVER) {
+            if (armageddon && brawl(n, dt)) {
+                stopAt = 24f
+                speed = 95f
+            } else if (n.faction == Faction.BELIEVER) {
                 if (n.mood == Mood.TERROR) {
                     // Run away from whatever just happened. No praying while panicking.
                     val dx = n.x - n.fearX
@@ -1731,19 +1945,18 @@ class World(val level: Int = 1, seed: Long = 7L) {
         val flock = count(Faction.BELIEVER)
         when {
             faith <= 0f -> lose("Crisis of Faith")
-            flock == 0 -> lose("Nobody left to worship you")
-            heathens == 0 && houses(Faction.NON_BELIEVER) == 0 -> {
-                outcome = Outcome.VICTORY
-                charging = false
-            }
-            // Holy War goes to whoever has more followers when time is up.
-            timeLeft <= 0f && holyWar && flock > heathens -> {
-                outcome = Outcome.VICTORY
-                charging = false
-            }
-            timeLeft <= 0f && holyWar -> lose("Outnumbered at the bell")
-            timeLeft <= 0f -> lose("They stopped paying attention")
+            flock == 0 -> lose(if (armageddon) "Lost at Armageddon" else "Nobody left to worship you")
+            // Once Armageddon starts the houses no longer count: last flock standing wins.
+            heathens == 0 && (armageddon || houses(Faction.NON_BELIEVER) == 0) -> win()
+            // A battle that will not end goes to whoever has more left.
+            armageddon && armageddonClock > 60f -> if (flock > heathens) win() else lose("Outnumbered at the end")
+            timeLeft <= 0f && !holyWar -> lose("They stopped paying attention")
         }
+    }
+
+    private fun win() {
+        outcome = Outcome.VICTORY
+        charging = false
     }
 
     private fun lose(reason: String) {

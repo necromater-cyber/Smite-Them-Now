@@ -26,6 +26,14 @@ enum class Power(val label: String, val cost: Float, val gesture: String) {
 
 enum class Outcome { PLAYING, VICTORY, DEFEAT }
 
+/** Chosen before a Holy War. Each one moves prices, so each one budgets differently. */
+enum class Doctrine(val label: String, val blurb: String) {
+    NONE("", ""),
+    SHEPHERD("Benevolent Shepherd", "Shield 9. Prophet converts faster. Meteor 45."),
+    WRATHFUL("Wrathful", "Meteor 25, Bolt 10. Faith losses half again."),
+    TRICKSTER("Trickster", "Gust 4 and stronger. Chains pay double.")
+}
+
 enum class FxKind { BOLT, BLAST, GUST, TEXT, ORB }
 
 class Npc(var x: Float, var y: Float, var faction: Faction, val role: Role = Role.FOLLOWER) {
@@ -76,8 +84,18 @@ class Building(
     val h: Float,
     val holy: Boolean = false,
     /** Whose settlement this belongs to in Holy War. Null in the chapters. */
-    val owner: Faction? = null
+    val owner: Faction? = null,
+    /** HOUSE, WATER (impassable, indestructible) or WALL (destructible, nobody lives in it). */
+    val kind: Int = HOUSE
 ) {
+    companion object {
+        const val HOUSE = 0
+        const val WATER = 1
+        const val WALL = 2
+    }
+
+    /** Seconds of protection left from the rival god. A warded building takes no damage. */
+    var ward = 0f
     var standing = true
     /** 0..1 while under construction, 1 once finished. */
     var built = 1f
@@ -96,7 +114,26 @@ class Banner(val x: Float, val y: Float, var ttl: Float)
  * A warning that the rival god is about to strike: a Bolt on [target], or a Meteor at x, y.
  * The player has until [ttl] runs out to Shield the spot or Gust people clear.
  */
-class Omen(val meteor: Boolean, var x: Float, var y: Float, val target: Npc?, var ttl: Float, val total: Float)
+class Omen(
+    val kind: Int,
+    var x: Float,
+    var y: Float,
+    val target: Npc?,
+    var ttl: Float,
+    val total: Float,
+    /** Direction of a GUST. */
+    val dx: Float = 0f,
+    val dy: Float = 0f
+) {
+    companion object {
+        const val BOLT = 0
+        const val METEOR = 1
+        const val GUST = 2
+    }
+
+    val meteor: Boolean get() = kind == METEOR
+    val gust: Boolean get() = kind == GUST
+}
 
 /** A Miracle Shield: Believers standing inside cannot be harmed while it lasts. */
 class Shield(val x: Float, val y: Float, val radius: Float, var ttl: Float)

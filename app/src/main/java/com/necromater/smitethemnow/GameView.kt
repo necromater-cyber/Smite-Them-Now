@@ -9,6 +9,7 @@ import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
 import com.necromater.smitethemnow.sim.Building
+import com.necromater.smitethemnow.sim.Doctrine
 import com.necromater.smitethemnow.sim.Faction
 import com.necromater.smitethemnow.sim.Fx
 import com.necromater.smitethemnow.sim.FxKind
@@ -35,14 +36,14 @@ import kotlin.random.Random
  */
 class GameView(context: Context) : View(context) {
 
-    private enum class Screen { MENU, BRIEFING, PLAY, RESULT }
+    private enum class Screen { MENU, SETUP, BRIEFING, PLAY, RESULT }
 
     private val prefs = context.getSharedPreferences("smite", Context.MODE_PRIVATE)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val serif: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
     private val serifBold: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
-    private val numerals = arrayOf("I", "II", "III", "IV", "V", "VI")
+    private val numerals = arrayOf("I", "II", "III", "IV", "V", "War")
 
     // The manuscript palette.
     private val ink = Color.rgb(46, 32, 22)
@@ -65,6 +66,18 @@ class GameView(context: Context) : View(context) {
     private var level = 0
     private var world = World(0)
     private var selected = Power.LIGHTNING
+
+    // Holy War choices, remembered between sessions.
+    private val mapNames = arrayOf("Two Hills", "The Ford", "Walled Town")
+    private val doctrines = arrayOf(Doctrine.SHEPHERD, Doctrine.WRATHFUL, Doctrine.TRICKSTER)
+    private var warMap = prefs.getInt("war_map", 0).coerceIn(0, 2)
+    private var warDoctrine = prefs.getInt("war_doctrine", 0).coerceIn(0, 2)
+    private var setupMapTop = 0f
+    private var setupMapBottom = 0f
+    private val setupDocTop = FloatArray(3)
+    private val setupDocBottom = FloatArray(3)
+    private var setupBeginTop = 0f
+    private var setupBeginBottom = 0f
 
     private var lastNanos = 0L
     private var clock = 0f
@@ -110,9 +123,18 @@ class GameView(context: Context) : View(context) {
 
     // ---------------------------------------------------------------- flow
 
-    private fun startLevel(index: Int) {
+    /** [setup] false skips the Holy War choices, for "Again". */
+    private fun startLevel(index: Int, setup: Boolean = true) {
         level = index.coerceIn(0, World.LEVELS.size - 1)
-        world = World(level, System.nanoTime())
+        if (level == World.HOLY_WAR && setup) {
+            screen = Screen.SETUP
+            return
+        }
+        world = if (level == World.HOLY_WAR) {
+            World(level, System.nanoTime(), doctrines[warDoctrine], warMap)
+        } else {
+            World(level, System.nanoTime())
+        }
         selected = Power.LIGHTNING
         dragging = false
         overTime = 0f
@@ -151,12 +173,25 @@ class GameView(context: Context) : View(context) {
                         if (sy >= cardTop[i] && sy <= cardBottom[i]) startLevel(i)
                     }
                 }
+                Screen.SETUP -> {
+                    if (sy >= setupMapTop && sy <= setupMapBottom) {
+                        warMap = (sx / (width / 3f)).toInt().coerceIn(0, 2)
+                        prefs.edit().putInt("war_map", warMap).apply()
+                    }
+                    for (i in 0 until 3) {
+                        if (sy >= setupDocTop[i] && sy <= setupDocBottom[i]) {
+                            warDoctrine = i
+                            prefs.edit().putInt("war_doctrine", warDoctrine).apply()
+                        }
+                    }
+                    if (sy >= setupBeginTop && sy <= setupBeginBottom) startLevel(World.HOLY_WAR, false)
+                }
                 Screen.BRIEFING -> screen = Screen.PLAY
                 Screen.RESULT -> {
                     if (overTime > 0.8f && buttons.isNotEmpty() && sy >= buttonTop && sy <= buttonBottom) {
                         val index = (sx / (width / buttons.size.toFloat())).toInt().coerceIn(0, buttons.size - 1)
                         when (buttons[index]) {
-                            "Again" -> startLevel(level)
+                            "Again" -> startLevel(level, false)
                             "Next" -> startLevel(level + 1)
                             else -> screen = Screen.MENU
                         }
@@ -233,6 +268,8 @@ class GameView(context: Context) : View(context) {
         canvas.drawColor(leather)
         if (screen == Screen.MENU) {
             drawMenu(canvas)
+        } else if (screen == Screen.SETUP) {
+            drawSetup(canvas)
         } else {
             canvas.save()
             if (world.shake > 0f) {
@@ -329,7 +366,19 @@ class GameView(context: Context) : View(context) {
         for (o in w.omens) {
             // The rival god's aim: a red mark that closes in until the blow lands.
             val left = (o.ttl / o.total).coerceIn(0f, 1f)
-            if (o.meteor) {
+            if (o.gust) {
+                // A red arrow: the rival's wind is about to blow this way.
+                val ax = o.x - o.dx * 110f
+                val ay = o.y - o.dy * 110f
+                val bx = o.x + o.dx * 110f
+                val by = o.y + o.dy * 110f
+                stroke(ink, 9f)
+                c.drawLine(ax, ay, bx, by, paint)
+                stroke(vermilion, 5f)
+                c.drawLine(ax, ay, bx, by, paint)
+                c.drawLine(bx, by, bx - o.dx * 30f - o.dy * 20f, by - o.dy * 30f + o.dx * 20f, paint)
+                c.drawLine(bx, by, bx - o.dx * 30f + o.dy * 20f, by - o.dy * 30f - o.dx * 20f, paint)
+            } else if (o.meteor) {
                 fill(Color.argb((50 + 90 * (1f - left)).toInt(), 120, 20, 20))
                 c.drawCircle(o.x, o.y, World.RIVAL_METEOR_RADIUS * (1f - left), paint)
                 stroke(ink, 8f)
@@ -407,6 +456,45 @@ class GameView(context: Context) : View(context) {
     }
 
     private fun drawBuilding(c: Canvas, b: Building, hiding: Int) {
+        if (b.kind == Building.WATER) {
+            fill(Color.rgb(96, 132, 190))
+            c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
+            stroke(Color.argb(170, 240, 228, 196), 3f)
+            var wx = b.x + 10f
+            var row = 0
+            while (wx < b.x + b.w - 30f) {
+                val wy = b.y + b.h * (if (row % 2 == 0) 0.33f else 0.68f) + 3f * sin(clock * 2f + wx * 0.02f)
+                c.drawLine(wx, wy, wx + 14f, wy - 6f, paint)
+                c.drawLine(wx + 14f, wy - 6f, wx + 28f, wy, paint)
+                wx += 44f
+                row++
+            }
+            stroke(ink, 3f)
+            c.drawLine(b.x, b.y, b.x + b.w, b.y, paint)
+            c.drawLine(b.x, b.y + b.h, b.x + b.w, b.y + b.h, paint)
+            return
+        }
+        if (b.kind == Building.WALL && b.standing) {
+            fill(Color.rgb(176, 166, 146))
+            c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
+            stroke(Color.argb(140, 46, 32, 22), 2f)
+            if (b.w > b.h) {
+                var bx = b.x + 30f
+                while (bx < b.x + b.w) {
+                    c.drawLine(bx, b.y, bx, b.y + b.h, paint)
+                    bx += 30f
+                }
+            } else {
+                var by = b.y + 30f
+                while (by < b.y + b.h) {
+                    c.drawLine(b.x, by, b.x + b.w, by, paint)
+                    by += 30f
+                }
+            }
+            stroke(ink, if (b.hp < 2) 6f else 3.5f)
+            c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
+            return
+        }
         if (!b.standing) {
             fill(Color.argb(70, 46, 32, 22))
             c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
@@ -463,6 +551,13 @@ class GameView(context: Context) : View(context) {
             stroke(goldLight, 4f)
             c.drawLine(dx, b.y + 8f, dx, b.y + roofH - 8f, paint)
             c.drawLine(dx - 13f, b.y + roofH * 0.4f, dx + 13f, b.y + roofH * 0.4f, paint)
+        }
+        if (b.ward > 0f) {
+            // The rival god's ward: nothing you throw at this will land.
+            stroke(ink, 8f)
+            c.drawRect(b.x - 10f, b.y - 10f, b.x + b.w + 10f, b.y + b.h + 10f, paint)
+            stroke(vermilion, 4f)
+            c.drawRect(b.x - 10f, b.y - 10f, b.x + b.w + 10f, b.y + b.h + 10f, paint)
         }
         if (hiding > 0) {
             // Eyes in the doorway and a head count: somebody is in there.
@@ -830,12 +925,24 @@ class GameView(context: Context) : View(context) {
 
         val secs = world.timeLeft.toInt()
         val clockText = (secs / 60).toString() + ":" + (secs % 60).toString().padStart(2, '0')
-        label(c, clockText, w / 2f, hudH * 0.5f, hudH * 0.4f, if (secs <= 20) Color.rgb(236, 110, 90) else vellum, Paint.Align.CENTER)
+        if (world.armageddon) {
+            fitted(c, "ARMAGEDDON", w / 2f, hudH * 0.48f, hudH * 0.3f, w * 0.3f, Color.rgb(236, 110, 90), true)
+        } else {
+            label(c, clockText, w / 2f, hudH * 0.5f, hudH * 0.4f, if (secs <= 20) Color.rgb(236, 110, 90) else vellum, Paint.Align.CENTER)
+        }
         if (world.holyWar) {
             // Head count for both sides, and the rival god's Prayer in red underneath.
             val tally = world.count(Faction.BELIEVER).toString() + " faithful · " + world.count(Faction.NON_BELIEVER) + " heathens"
             plain(c, tally, w / 2f, hudH * 0.76f, hudH * 0.2f, vellumDark, Paint.Align.CENTER)
-            meter(c, w * 0.37f, hudH * 0.84f, w * 0.63f, hudH * 0.97f, world.rivalPrayer / World.MAX_PRAYER, vermilion)
+            val rl = w * 0.37f
+            val rr = w * 0.63f
+            meter(c, rl, hudH * 0.84f, rr, hudH * 0.97f, world.rivalPrayer / World.MAX_PRAYER, vermilion)
+            // Notches where it can afford a Bolt and a Meteor, so you can see what is coming.
+            stroke(ink, 3f)
+            val boltAt = rl + (rr - rl) * World.RIVAL_BOLT_COST / World.MAX_PRAYER
+            val meteorAt = rl + (rr - rl) * World.RIVAL_METEOR_COST / World.MAX_PRAYER
+            c.drawLine(boltAt, hudH * 0.82f, boltAt, hudH * 0.99f, paint)
+            c.drawLine(meteorAt, hudH * 0.82f, meteorAt, hudH * 0.99f, paint)
         } else {
             plain(c, world.count(Faction.NON_BELIEVER).toString() + " heathens", w / 2f, hudH * 0.84f, hudH * 0.24f, vellumDark, Paint.Align.CENTER)
         }
@@ -915,7 +1022,7 @@ class GameView(context: Context) : View(context) {
         val capW = paint.measureText("S")
         paint.textSize = rest
         val restW = paint.measureText("mite Them Now")
-        val startX = (w - capW - restW - 14f) / 2f + 2f
+        val startX = (w - capW - restW - 14f) / 2f + 8f
         val baseY = h * 0.15f
         fill(ultramarine)
         c.drawRect(startX - 10f, baseY - big * 0.8f, startX + capW + 6f, baseY + big * 0.08f, paint)
@@ -971,7 +1078,58 @@ class GameView(context: Context) : View(context) {
             c.drawText(stars(bestStars(i)), textL, t + cardH * 0.62f, paint)
             fitted(c, info.blurb, (cardL + cardR) / 2f, t + cardH * 0.87f, cardH * 0.15f, cardR - cardL - 32f, ink, false)
         }
-        fitted(c, "Tap a chapter to begin", w / 2f, h * 0.935f, w * 0.042f, w * 0.7f, vermilion, true)
+        fitted(c, "Tap a chapter, or go to war", w / 2f, h * 0.935f, w * 0.042f, w * 0.7f, vermilion, true)
+    }
+
+    /** Holy War: pick the ground and a doctrine before the match. */
+    private fun drawSetup(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val m = w * 0.05f
+        sheet(c, m, m, w - m, h - m)
+        val inner = w - 2f * m - 80f
+        fitted(c, "Holy War", w / 2f, h * 0.13f, w * 0.12f, inner, ink, true)
+        fitted(c, "A rival god. Two growing flocks. Five minutes.", w / 2f, h * 0.175f, w * 0.04f, inner, vermilion, false)
+
+        fitted(c, "The ground", w / 2f, h * 0.25f, w * 0.05f, inner, ink, true)
+        setupMapTop = h * 0.27f
+        setupMapBottom = h * 0.35f
+        val slot = w / 3f
+        for (i in 0 until 3) {
+            val l = max(m + 24f, i * slot + slot * 0.06f)
+            val r = min(w - m - 24f, (i + 1) * slot - slot * 0.06f)
+            val on = i == warMap
+            fill(if (on) ultramarine else vellumDark)
+            c.drawRoundRect(l, setupMapTop, r, setupMapBottom, 14f, 14f, paint)
+            stroke(if (on) gold else ink, if (on) 6f else 3f)
+            c.drawRoundRect(l, setupMapTop, r, setupMapBottom, 14f, 14f, paint)
+            fitted(c, mapNames[i], (l + r) / 2f, setupMapTop + (setupMapBottom - setupMapTop) * 0.62f, w * 0.042f, r - l - 24f, if (on) goldLight else ink, true)
+        }
+
+        fitted(c, "Your doctrine", w / 2f, h * 0.43f, w * 0.05f, inner, ink, true)
+        val dl = m + w * 0.06f
+        val dr = w - m - w * 0.06f
+        for (i in 0 until 3) {
+            val t = h * 0.455f + i * h * 0.105f
+            val b = t + h * 0.092f
+            setupDocTop[i] = t
+            setupDocBottom[i] = b
+            val on = i == warDoctrine
+            fill(if (on) Color.rgb(246, 238, 214) else vellumDark)
+            c.drawRoundRect(dl, t, dr, b, 14f, 14f, paint)
+            stroke(if (on) gold else ink, if (on) 7f else 3f)
+            c.drawRoundRect(dl, t, dr, b, 14f, 14f, paint)
+            fitted(c, doctrines[i].label, w / 2f, t + (b - t) * 0.42f, w * 0.05f, dr - dl - 40f, ink, true)
+            fitted(c, doctrines[i].blurb, w / 2f, t + (b - t) * 0.8f, w * 0.036f, dr - dl - 40f, vermilion, false)
+        }
+
+        setupBeginTop = h * 0.81f
+        setupBeginBottom = h * 0.89f
+        fill(ultramarine)
+        c.drawRoundRect(w * 0.25f, setupBeginTop, w * 0.75f, setupBeginBottom, 16f, 16f, paint)
+        stroke(ink, 3.5f)
+        c.drawRoundRect(w * 0.25f, setupBeginTop, w * 0.75f, setupBeginBottom, 16f, 16f, paint)
+        fitted(c, "Begin", w / 2f, setupBeginTop + (setupBeginBottom - setupBeginTop) * 0.66f, w * 0.06f, w * 0.4f, goldLight, true)
     }
 
     private fun drawBriefing(c: Canvas) {

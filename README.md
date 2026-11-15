@@ -53,12 +53,34 @@ Stars: one for winning, one for losing no Believers (dead or led astray), one fo
 
 ## Holy War
 
-A longer mode, about five minutes, sixth on the chapter list. It borrows from Populous.
+A longer mode, about five minutes, last on the chapter list. It borrows from Populous. The game here is the Prayer budget: every point spent on defence is one not spent on attack, and the rival god makes you pay for both.
 
-- **A rival god** earns Prayer from living heathens (the red bar under the clock) and spends it on your flock. A red crosshair on a Believer means a Bolt lands in 1.6 seconds. A red ring means a Meteor in 2.6. Shield the spot, or Gust your people out of the ring. Believers it kills cost 10 Faith each.
-- **Settlements grow.** Every finished house sends out a new follower every 16 seconds, and each side keeps founding houses on its own half of the page, up to five. Houses here take three blasts; a direct Meteor only cracks them. Foundations fall to one.
-- **Rally** (tap, 10 Prayer) plants a banner for 12 seconds. Your flock gathers there and fights any heathen in reach. About one fight in four goes the other way, at 5 Faith.
-- **Winning:** wipe out every heathen and every heathen house, or have more followers when time runs out. Stars for winning, for keeping your Prophet alive, and for finishing before the bell.
+**Before the match** you pick the ground and a doctrine.
+
+| Ground | What it changes |
+|---|---|
+| Two Hills | Open ground, a barrel line down the middle |
+| The Ford | A river with one crossing, barrels on the crossing |
+| Walled Town | The heathens sit behind stone walls with one gate. Blasts break the walls. |
+
+| Doctrine | What it changes |
+|---|---|
+| Benevolent Shepherd | Shield 9, Prophet converts in 3 seconds, Meteor 45 |
+| Wrathful | Meteor 25, Bolt 10, every Faith loss is half again as large |
+| Trickster | Gust 4 and 40% stronger, chain bonuses doubled |
+
+**The rival god** earns Prayer from living heathens. The red bar under the clock shows it, with notches where it can afford a Bolt (20) and a Meteor (45).
+- A red crosshair on a Believer: a Bolt lands in 1.6 seconds.
+- A red ring: a Meteor lands in 2.6 seconds. It only fires at four or more Believers standing together.
+- A red arrow: a Gust. It uses this to blow a marked Believer out from under your Shield, or to send a rallied flock home.
+- A red frame around one of its houses: a ward, thrown up while you charge a Meteor over it. Nothing you drop will land for 5 seconds. Release early for a free fizzle, or aim elsewhere.
+- Believers it kills cost 10 Faith each. It gloats.
+
+**Settlements grow.** Every finished house sends out a new follower every 16 seconds, and each side keeps founding houses on its own half of the page, up to five. Houses here take three blasts; a direct Meteor only cracks them. Foundations fall to one.
+
+**Rally** (tap, 10 Prayer) plants a banner for 12 seconds. Your flock gathers there and fights any heathen in reach. About one fight in four goes the other way, at 5 Faith.
+
+**Winning.** Wipe out every heathen and every heathen house inside five minutes for three stars. Otherwise the clock runs out and it is **Armageddon**: nobody shelters, nobody builds, nobody prays, and both flocks charge. Whatever Prayer you saved is all you have to tip it. Last flock standing wins.
 
 ## What is in the code
 
