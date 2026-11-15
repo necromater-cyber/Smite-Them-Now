@@ -4,38 +4,71 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
+import com.necromater.smitethemnow.sim.Building
 import com.necromater.smitethemnow.sim.Faction
 import com.necromater.smitethemnow.sim.Fx
 import com.necromater.smitethemnow.sim.FxKind
 import com.necromater.smitethemnow.sim.Mood
+import com.necromater.smitethemnow.sim.Npc
 import com.necromater.smitethemnow.sim.Outcome
 import com.necromater.smitethemnow.sim.Power
 import com.necromater.smitethemnow.sim.World
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.random.Random
 
 /**
- * Draws the world with placeholder shapes and turns touches into powers.
+ * Draws the game as a page from an illuminated manuscript and turns touches into powers.
  *
- * Layout, top to bottom: HUD strip, the diorama, the power bar.
+ * Screens: chapter list, a briefing card, play, and the result card.
+ * Layout during play, top to bottom: HUD strip, the page, the power bar.
  * The loop is the simplest one that works: update and draw in onDraw,
  * then ask for the next frame.
  */
 class GameView(context: Context) : View(context) {
 
-    private var world = World()
+    private enum class Screen { MENU, BRIEFING, PLAY, RESULT }
+
+    private val prefs = context.getSharedPreferences("smite", Context.MODE_PRIVATE)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val path = Path()
+    private val serif: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+    private val serifBold: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
     private val powers = Power.values()
+    private val numerals = arrayOf("I", "II", "III", "IV", "V")
+
+    // The manuscript palette.
+    private val ink = Color.rgb(46, 32, 22)
+    private val vellum = Color.rgb(232, 216, 176)
+    private val vellumDark = Color.rgb(212, 192, 148)
+    private val leather = Color.rgb(52, 34, 24)
+    private val gold = Color.rgb(222, 174, 54)
+    private val goldLight = Color.rgb(250, 226, 136)
+    private val vermilion = Color.rgb(196, 52, 36)
+    private val ultramarine = Color.rgb(40, 62, 140)
+    private val murrey = Color.rgb(120, 36, 66)
+    private val skin = Color.rgb(236, 200, 160)
+
+    // Faint stains so the page does not look like a flat fill.
+    private val blotX = FloatArray(70)
+    private val blotY = FloatArray(70)
+    private val blotR = FloatArray(70)
+
+    private var screen = Screen.MENU
+    private var level = 0
+    private var world = World(0)
+    private var selected = Power.LIGHTNING
 
     private var lastNanos = 0L
     private var clock = 0f
-    private var started = false
     private var overTime = 0f
-    private var selected = Power.LIGHTNING
 
     private var scale = 1f
     private var originX = 0f
@@ -49,14 +82,61 @@ class GameView(context: Context) : View(context) {
     private var dragX1 = 0f
     private var dragY1 = 0f
 
+    // Tap targets worked out while drawing.
+    private val cardTop = FloatArray(World.LEVELS.size)
+    private val cardBottom = FloatArray(World.LEVELS.size)
+    private var buttonTop = 0f
+    private var buttonBottom = 0f
+    private var buttons: List<String> = emptyList()
+
+    init {
+        val r = Random(3)
+        for (i in blotX.indices) {
+            blotX[i] = r.nextFloat() * World.W
+            blotY[i] = r.nextFloat() * World.H
+            blotR[i] = 14f + r.nextFloat() * 46f
+        }
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         hudH = h * 0.085f
-        barH = h * 0.12f
+        barH = h * 0.11f
         val areaH = h - hudH - barH
         scale = min(w / World.W, areaH / World.H)
         originX = (w - World.W * scale) / 2f
         originY = hudH + (areaH - World.H * scale) / 2f
+    }
+
+    // ---------------------------------------------------------------- flow
+
+    private fun startLevel(index: Int) {
+        level = index.coerceIn(0, World.LEVELS.size - 1)
+        world = World(level, System.nanoTime())
+        selected = Power.LIGHTNING
+        dragging = false
+        overTime = 0f
+        screen = Screen.BRIEFING
+    }
+
+    /** Called for the system Back button. Returns false when the app should close. */
+    fun handleBack(): Boolean {
+        if (screen == Screen.MENU) return false
+        world.cancelCharge()
+        dragging = false
+        screen = Screen.MENU
+        return true
+    }
+
+    private fun bestStars(index: Int): Int = prefs.getInt("stars_$index", 0)
+
+    private fun finishLevel() {
+        screen = Screen.RESULT
+        overTime = 0f
+        dragging = false
+        if (world.outcome == Outcome.VICTORY && world.stars() > bestStars(level)) {
+            prefs.edit().putInt("stars_$level", world.stars()).apply()
+        }
     }
 
     // ---------------------------------------------------------------- input
@@ -65,31 +145,42 @@ class GameView(context: Context) : View(context) {
         val sx = event.x
         val sy = event.y
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                if (!started) {
-                    started = true
-                    return true
+            MotionEvent.ACTION_DOWN -> when (screen) {
+                Screen.MENU -> {
+                    for (i in cardTop.indices) {
+                        if (sy >= cardTop[i] && sy <= cardBottom[i]) startLevel(i)
+                    }
                 }
-                if (world.outcome != Outcome.PLAYING) {
-                    if (overTime > 0.8f) restart()
-                    return true
+                Screen.BRIEFING -> screen = Screen.PLAY
+                Screen.RESULT -> {
+                    if (overTime > 0.8f && buttons.isNotEmpty() && sy >= buttonTop && sy <= buttonBottom) {
+                        val index = (sx / (width / buttons.size.toFloat())).toInt().coerceIn(0, buttons.size - 1)
+                        when (buttons[index]) {
+                            "Again" -> startLevel(level)
+                            "Next" -> startLevel(level + 1)
+                            else -> screen = Screen.MENU
+                        }
+                    }
                 }
-                if (sy >= height - barH) {
-                    val index = (sx / (width / powers.size.toFloat())).toInt()
-                    selected = powers[index.coerceIn(0, powers.size - 1)]
-                    return true
-                }
-                val wx = toWorldX(sx)
-                val wy = toWorldY(sy)
-                when (selected) {
-                    Power.LIGHTNING -> world.castLightning(wx, wy)
-                    Power.METEOR -> world.beginCharge(wx, wy)
-                    Power.GUST -> {
-                        dragging = true
-                        dragX0 = wx
-                        dragY0 = wy
-                        dragX1 = wx
-                        dragY1 = wy
+                Screen.PLAY -> {
+                    if (sy >= height - barH) {
+                        val index = (sx / (width / powers.size.toFloat())).toInt()
+                        selected = powers[index.coerceIn(0, powers.size - 1)]
+                        return true
+                    }
+                    val wx = toWorldX(sx)
+                    val wy = toWorldY(sy)
+                    when (selected) {
+                        Power.LIGHTNING -> world.castLightning(wx, wy)
+                        Power.SHIELD -> world.castShield(wx, wy)
+                        Power.METEOR -> world.beginCharge(wx, wy)
+                        Power.GUST -> {
+                            dragging = true
+                            dragX0 = wx
+                            dragY0 = wy
+                            dragX1 = wx
+                            dragY1 = wy
+                        }
                     }
                 }
             }
@@ -117,12 +208,6 @@ class GameView(context: Context) : View(context) {
         return true
     }
 
-    private fun restart() {
-        world = World(System.nanoTime())
-        overTime = 0f
-        dragging = false
-    }
-
     private fun toWorldX(sx: Float) = ((sx - originX) / scale).coerceIn(0f, World.W)
     private fun toWorldY(sy: Float) = ((sy - originY) / scale).coerceIn(0f, World.H)
 
@@ -135,131 +220,320 @@ class GameView(context: Context) : View(context) {
         lastNanos = now
         clock += dt
 
-        if (started) {
+        if (screen == Screen.PLAY) {
             world.update(dt)
-            if (world.outcome != Outcome.PLAYING) overTime += dt
+            if (world.outcome != Outcome.PLAYING) finishLevel()
+        } else if (screen == Screen.RESULT) {
+            world.update(dt)
+            overTime += dt
         }
 
-        canvas.drawColor(Color.rgb(24, 22, 30))
+        canvas.drawColor(leather)
+        if (screen == Screen.MENU) {
+            drawMenu(canvas)
+        } else {
+            canvas.save()
+            if (world.shake > 0f) {
+                val s = world.shake * 22f
+                canvas.translate(sin(clock * 91f) * s, sin(clock * 77f + 1.3f) * s)
+            }
+            canvas.translate(originX, originY)
+            canvas.scale(scale, scale)
+            drawWorld(canvas)
+            canvas.restore()
 
-        canvas.save()
-        if (world.shake > 0f) {
-            val s = world.shake * 22f
-            canvas.translate(sin(clock * 91f) * s, sin(clock * 77f + 1.3f) * s)
+            drawHud(canvas)
+            drawPowerBar(canvas)
+            if (screen == Screen.BRIEFING) drawBriefing(canvas)
+            if (screen == Screen.RESULT) drawResult(canvas)
         }
-        canvas.translate(originX, originY)
-        canvas.scale(scale, scale)
-        drawWorld(canvas)
-        canvas.restore()
-
-        drawHud(canvas)
-        drawPowerBar(canvas)
-        if (!started) drawIntro(canvas)
-        else if (world.outcome != Outcome.PLAYING) drawResult(canvas)
 
         postInvalidateOnAnimation()
     }
 
-    // ---------------------------------------------------------------- world
+    // ---------------------------------------------------------------- the page
 
     private fun drawWorld(c: Canvas) {
         val w = world
-        fill(Color.rgb(196, 182, 140))
+        fill(vellum)
         c.drawRect(0f, 0f, World.W, World.H, paint)
+        fill(Color.argb(26, 120, 84, 40))
+        for (i in blotX.indices) c.drawCircle(blotX[i], blotY[i], blotR[i], paint)
 
-        // Scorch marks where someone used to be.
+        // What is left of the smitten: a smudge and a small ink cross.
         for (n in w.npcs) {
             if (n.alive) continue
-            fill(Color.argb(70, 40, 30, 20))
-            c.drawCircle(n.x, n.y, 13f, paint)
+            fill(Color.argb(60, 46, 32, 22))
+            c.drawCircle(n.x, n.y + 6f, 13f, paint)
+            stroke(Color.argb(150, 46, 32, 22), 2.5f)
+            c.drawLine(n.x - 6f, n.y, n.x + 6f, n.y + 12f, paint)
+            c.drawLine(n.x + 6f, n.y, n.x - 6f, n.y + 12f, paint)
         }
 
-        for (b in w.buildings) {
-            if (b.standing) {
-                fill(Color.rgb(122, 92, 66))
-                c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
-                fill(Color.rgb(150, 70, 52))
-                c.drawRect(b.x + 10f, b.y + 10f, b.x + b.w - 10f, b.y + b.h - 10f, paint)
-                stroke(Color.rgb(98, 44, 34), 4f)
-                c.drawLine(b.x + 10f, b.y + b.h / 2f, b.x + b.w - 10f, b.y + b.h / 2f, paint)
-            } else {
-                fill(Color.argb(150, 80, 70, 60))
-                c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
-                fill(Color.rgb(104, 94, 84))
+        for (r in w.rods) {
+            if (!r.alive) continue
+            stroke(Color.argb(95, 46, 32, 22), 3f)
+            dashedRing(c, r.x, r.y, World.ROD_RADIUS, 40)
+        }
+
+        for (s in w.shields) drawShield(c, s.x, s.y, s.radius, min(1f, s.ttl))
+        for (b in w.buildings) drawBuilding(c, b)
+
+        for (b in w.barrels) {
+            if (!b.alive) continue
+            val lit = b.fuse >= 0f
+            fill(if (lit) vermilion else Color.rgb(150, 100, 52))
+            c.drawCircle(b.x, b.y, 14f, paint)
+            stroke(ink, 3f)
+            c.drawCircle(b.x, b.y, 14f, paint)
+            c.drawCircle(b.x, b.y, 7f, paint)
+        }
+
+        for (r in w.rods) drawRod(c, r.x, r.y, r.alive, r.charges)
+        for (f in w.fires) drawFire(c, f.x, f.y, f.radius, min(1f, f.ttl / 0.6f))
+        for (n in w.npcs) if (n.alive) drawNpc(c, n)
+
+        if (w.charging) {
+            val full = w.charge >= 1f
+            fill(Color.argb((40 + 80 * w.charge).toInt(), 196, 52, 36))
+            c.drawCircle(w.chargeX, w.chargeY, World.METEOR_RADIUS * w.charge, paint)
+            stroke(ink, if (full) 9f else 6f)
+            c.drawCircle(w.chargeX, w.chargeY, World.METEOR_RADIUS, paint)
+            stroke(if (full) goldLight else gold, if (full) 5f else 3f)
+            c.drawCircle(w.chargeX, w.chargeY, World.METEOR_RADIUS, paint)
+            if (full) {
                 var k = 0
-                while (k < 9) {
-                    val rx = b.x + b.w * (0.12f + 0.38f * (k % 3))
-                    val ry = b.y + b.h * (0.18f + 0.32f * (k / 3))
-                    c.drawCircle(rx, ry, 11f + (k % 2) * 5f, paint)
+                while (k < 12) {
+                    val a = k * 0.5236f + clock * 0.8f
+                    c.drawLine(
+                        w.chargeX + cos(a) * (World.METEOR_RADIUS + 10f), w.chargeY + sin(a) * (World.METEOR_RADIUS + 10f),
+                        w.chargeX + cos(a) * (World.METEOR_RADIUS + 30f), w.chargeY + sin(a) * (World.METEOR_RADIUS + 30f), paint
+                    )
                     k++
                 }
             }
         }
 
-        for (b in w.barrels) {
-            if (!b.alive) continue
-            val lit = b.fuse >= 0f
-            fill(if (lit) Color.rgb(255, 120, 40) else Color.rgb(94, 60, 30))
-            c.drawCircle(b.x, b.y, 14f, paint)
-            stroke(Color.rgb(40, 26, 14), 3f)
-            c.drawCircle(b.x, b.y, 14f, paint)
-            c.drawCircle(b.x, b.y, 7f, paint)
-        }
-
-        for (f in w.fires) {
-            val fade = min(1f, f.ttl / 0.6f)
-            val flicker = 0.85f + 0.15f * sin(clock * 18f + f.x * 0.05f)
-            fill(Color.argb((95 * fade).toInt(), 255, 110, 20))
-            c.drawCircle(f.x, f.y, f.radius * flicker, paint)
-            fill(Color.argb((150 * fade).toInt(), 255, 200, 60))
-            c.drawCircle(f.x, f.y, f.radius * 0.55f * flicker, paint)
-        }
-
-        for (n in w.npcs) {
-            if (!n.alive) continue
-            val r = World.NPC_RADIUS
-            if (n.faction == Faction.BELIEVER) {
-                when (n.mood) {
-                    Mood.ZEALOT -> {
-                        val pulse = 4f + 3f * sin(clock * 12f + n.x)
-                        stroke(Color.argb(220, 255, 255, 255), 3f)
-                        c.drawCircle(n.x, n.y, r + pulse, paint)
-                        fill(Color.rgb(255, 222, 80))
-                    }
-                    Mood.TERROR -> fill(Color.rgb(150, 170, 200))
-                    else -> fill(Color.rgb(240, 196, 60))
-                }
-                c.drawCircle(n.x, n.y, r, paint)
-                stroke(Color.rgb(110, 84, 20), 2.5f)
-                c.drawCircle(n.x, n.y, r, paint)
-            } else {
-                fill(Color.rgb(140, 40, 70))
-                c.drawCircle(n.x, n.y, r, paint)
-                stroke(Color.rgb(60, 14, 30), 2.5f)
-                c.drawCircle(n.x, n.y, r, paint)
-                if (n.mood == Mood.SPOOKED) {
-                    text(Color.rgb(60, 14, 30), 30f, Paint.Align.CENTER, true)
-                    c.drawText("!", n.x, n.y - r - 6f, paint)
-                }
-            }
-        }
-
-        if (w.charging) {
-            val full = w.charge >= 1f
-            fill(Color.argb((40 + 90 * w.charge).toInt(), 255, 90, 30))
-            c.drawCircle(w.chargeX, w.chargeY, World.METEOR_RADIUS * w.charge, paint)
-            stroke(if (full) Color.WHITE else Color.rgb(255, 150, 60), if (full) 7f else 4f)
-            c.drawCircle(w.chargeX, w.chargeY, World.METEOR_RADIUS, paint)
-        }
-
         if (dragging) {
-            stroke(Color.argb(170, 255, 255, 255), 8f)
+            stroke(Color.argb(200, 46, 32, 22), 9f)
             c.drawLine(dragX0, dragY0, dragX1, dragY1, paint)
-            fill(Color.argb(170, 255, 255, 255))
-            c.drawCircle(dragX1, dragY1, 14f, paint)
+            stroke(Color.argb(230, 250, 226, 136), 4f)
+            c.drawLine(dragX0, dragY0, dragX1, dragY1, paint)
+            fill(goldLight)
+            c.drawCircle(dragX1, dragY1, 12f, paint)
+            stroke(ink, 2.5f)
+            c.drawCircle(dragX1, dragY1, 12f, paint)
         }
 
         for (f in w.fx) drawFx(c, f)
+        drawPageBorder(c)
+    }
+
+    private fun drawPageBorder(c: Canvas) {
+        stroke(ink, 4f)
+        c.drawRect(2f, 2f, World.W - 2f, World.H - 2f, paint)
+        stroke(vermilion, 7f)
+        c.drawRect(11f, 11f, World.W - 11f, World.H - 11f, paint)
+        stroke(gold, 3f)
+        c.drawRect(20f, 20f, World.W - 20f, World.H - 20f, paint)
+        var k = 0
+        while (k < 4) {
+            val cx = if (k % 2 == 0) 16f else World.W - 16f
+            val cy = if (k < 2) 16f else World.H - 16f
+            fill(ultramarine)
+            c.drawCircle(cx, cy, 15f, paint)
+            fill(gold)
+            c.drawCircle(cx, cy, 7f, paint)
+            stroke(ink, 2.5f)
+            c.drawCircle(cx, cy, 15f, paint)
+            k++
+        }
+    }
+
+    private fun drawBuilding(c: Canvas, b: Building) {
+        if (!b.standing) {
+            fill(Color.argb(70, 46, 32, 22))
+            c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
+            var k = 0
+            while (k < 9) {
+                val rx = b.x + b.w * (0.14f + 0.36f * (k % 3))
+                val ry = b.y + b.h * (0.2f + 0.3f * (k / 3))
+                val rr = 10f + (k % 2) * 5f
+                fill(vellumDark)
+                c.drawCircle(rx, ry, rr, paint)
+                stroke(ink, 2f)
+                c.drawCircle(rx, ry, rr, paint)
+                k++
+            }
+            return
+        }
+        // Flat, front-on and proud of it, like a building in a margin.
+        fill(Color.rgb(240, 228, 196))
+        c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
+        val roofH = b.h * 0.42f
+        fill(if (b.holy) ultramarine else vermilion)
+        c.drawRect(b.x, b.y, b.x + b.w, b.y + roofH, paint)
+        stroke(Color.argb(110, 250, 226, 136), 2f)
+        var hx = b.x + 14f
+        while (hx < b.x + b.w - 4f) {
+            c.drawLine(hx, b.y + 4f, hx - 10f, b.y + roofH - 4f, paint)
+            hx += 16f
+        }
+        stroke(ink, 3.5f)
+        c.drawRect(b.x, b.y, b.x + b.w, b.y + b.h, paint)
+        c.drawLine(b.x, b.y + roofH, b.x + b.w, b.y + roofH, paint)
+        // Door.
+        val dx = b.x + b.w / 2f
+        fill(ink)
+        c.drawRect(dx - 11f, b.y + b.h - 34f, dx + 11f, b.y + b.h, paint)
+        c.drawCircle(dx, b.y + b.h - 34f, 11f, paint)
+        if (b.holy) {
+            stroke(ink, 8f)
+            c.drawLine(dx, b.y + 8f, dx, b.y + roofH - 8f, paint)
+            c.drawLine(dx - 13f, b.y + roofH * 0.4f, dx + 13f, b.y + roofH * 0.4f, paint)
+            stroke(goldLight, 4f)
+            c.drawLine(dx, b.y + 8f, dx, b.y + roofH - 8f, paint)
+            c.drawLine(dx - 13f, b.y + roofH * 0.4f, dx + 13f, b.y + roofH * 0.4f, paint)
+        }
+    }
+
+    private fun drawNpc(c: Canvas, n: Npc) {
+        val x = n.x
+        val y = n.y
+        val believer = n.faction == Faction.BELIEVER
+        val zealot = believer && n.mood == Mood.ZEALOT
+        val terror = believer && n.mood == Mood.TERROR
+        val headY = y - 11f
+
+        if (zealot) {
+            // Rays of unreasonable enthusiasm.
+            stroke(gold, 3f)
+            var k = 0
+            while (k < 8) {
+                val a = k * 0.7854f + clock * 2f
+                c.drawLine(x + cos(a) * 15f, headY + sin(a) * 15f, x + cos(a) * 23f, headY + sin(a) * 23f, paint)
+                k++
+            }
+            stroke(ink, 3f)
+            c.drawLine(x - 7f, y - 3f, x - 15f, y - 16f, paint)
+            c.drawLine(x + 7f, y - 3f, x + 15f, y - 16f, paint)
+        }
+
+        // Robe.
+        path.reset()
+        path.moveTo(x - 5f, y - 6f)
+        path.lineTo(x + 5f, y - 6f)
+        path.lineTo(x + 11f, y + 14f)
+        path.lineTo(x - 11f, y + 14f)
+        path.close()
+        fill(if (!believer) murrey else if (terror) Color.rgb(150, 160, 184) else ultramarine)
+        c.drawPath(path, paint)
+        stroke(ink, 2.5f)
+        c.drawPath(path, paint)
+
+        if (believer && !terror) {
+            fill(if (zealot) goldLight else gold)
+            c.drawCircle(x, headY, 11f, paint)
+            stroke(ink, 1.5f)
+            c.drawCircle(x, headY, 11f, paint)
+        }
+
+        fill(skin)
+        c.drawCircle(x, headY, 6.5f, paint)
+        stroke(ink, 2f)
+        c.drawCircle(x, headY, 6.5f, paint)
+
+        if (!believer) {
+            // A pointed hood, so nobody mistakes them for the saved.
+            path.reset()
+            path.moveTo(x - 8f, headY - 2f)
+            path.lineTo(x + 2f, headY - 21f)
+            path.lineTo(x + 8f, headY - 2f)
+            path.close()
+            fill(ink)
+            c.drawPath(path, paint)
+            if (n.mood == Mood.SPOOKED) {
+                label(c, "!", x + 15f, headY - 8f, 30f, vermilion, Paint.Align.CENTER)
+            }
+        }
+    }
+
+    private fun drawFire(c: Canvas, x: Float, y: Float, radius: Float, fade: Float) {
+        fill(Color.argb((70 * fade).toInt(), 196, 52, 36))
+        c.drawCircle(x, y, radius, paint)
+        var k = 0
+        while (k < 7) {
+            val a = k * 0.898f + x * 0.01f
+            val d = if (k == 0) 0f else radius * 0.52f
+            val px = x + cos(a) * d
+            val py = y + sin(a) * d
+            val h = radius * 0.5f * (0.8f + 0.2f * sin(clock * 14f + k * 1.7f + x))
+            flame(c, px, py, h, Color.argb((235 * fade).toInt(), 196, 52, 36))
+            flame(c, px, py + h * 0.12f, h * 0.55f, Color.argb((235 * fade).toInt(), 250, 226, 136))
+            k++
+        }
+    }
+
+    private fun flame(c: Canvas, x: Float, y: Float, h: Float, color: Int) {
+        path.reset()
+        path.moveTo(x - h * 0.36f, y + h * 0.3f)
+        path.lineTo(x - h * 0.12f, y - h * 0.15f)
+        path.lineTo(x, y - h * 0.75f)
+        path.lineTo(x + h * 0.14f, y - h * 0.1f)
+        path.lineTo(x + h * 0.36f, y + h * 0.3f)
+        path.close()
+        fill(color)
+        c.drawPath(path, paint)
+    }
+
+    private fun drawShield(c: Canvas, x: Float, y: Float, radius: Float, fade: Float) {
+        fill(Color.argb((60 * fade).toInt(), 250, 226, 136))
+        c.drawCircle(x, y, radius, paint)
+        stroke(Color.argb((200 * fade).toInt(), 46, 32, 22), 8f)
+        c.drawCircle(x, y, radius, paint)
+        stroke(Color.argb((255 * fade).toInt(), 250, 226, 136), 4f)
+        c.drawCircle(x, y, radius, paint)
+        stroke(Color.argb((170 * fade).toInt(), 222, 174, 54), 3f)
+        dashedRing(c, x, y, radius - 14f, 24)
+    }
+
+    private fun drawRod(c: Canvas, x: Float, y: Float, alive: Boolean, charges: Int) {
+        if (!alive) {
+            stroke(ink, 6f)
+            c.drawLine(x - 6f, y + 4f, x + 44f, y + 16f, paint)
+            fill(ink)
+            c.drawCircle(x - 6f, y + 4f, 9f, paint)
+            return
+        }
+        fill(ink)
+        c.drawCircle(x, y, 13f, paint)
+        stroke(ink, 7f)
+        c.drawLine(x, y, x, y - 54f, paint)
+        // The orb reddens as it fills.
+        fill(if (charges == 0) gold else if (charges == 1) Color.rgb(226, 130, 44) else vermilion)
+        c.drawCircle(x, y - 58f, 11f, paint)
+        stroke(ink, 2.5f)
+        c.drawCircle(x, y - 58f, 11f, paint)
+        if (charges > 0) {
+            stroke(goldLight, 2.5f)
+            var k = 0
+            while (k < 6) {
+                val a = k * 1.047f + clock * 6f
+                c.drawLine(x + cos(a) * 15f, y - 58f + sin(a) * 15f, x + cos(a) * (19f + charges * 3f), y - 58f + sin(a) * (19f + charges * 3f), paint)
+                k++
+            }
+        }
+    }
+
+    private fun dashedRing(c: Canvas, x: Float, y: Float, radius: Float, dashes: Int) {
+        val step = 6.2832f / (dashes * 2)
+        var k = 0
+        while (k < dashes) {
+            val a0 = k * 2 * step
+            val a1 = a0 + step
+            c.drawLine(x + cos(a0) * radius, y + sin(a0) * radius, x + cos(a1) * radius, y + sin(a1) * radius, paint)
+            k++
+        }
     }
 
     private fun drawFx(c: Canvas, f: Fx) {
@@ -267,27 +541,35 @@ class GameView(context: Context) : View(context) {
         val alpha = (255 * (1f - t)).toInt()
         when (f.kind) {
             FxKind.BOLT -> {
-                stroke(Color.argb(alpha, 255, 255, 190), 7f)
-                var px = f.x + 60f
-                var py = f.y - 520f
-                var i = 1
-                while (i <= 6) {
-                    val k = i / 6f
-                    val jitter = if (i == 6) 0f else sin(i * 12.9898f + f.x) * 26f
-                    val nx = f.x + 60f * (1f - k) + jitter
-                    val ny = f.y - 520f * (1f - k)
-                    c.drawLine(px, py, nx, ny, paint)
-                    px = nx
-                    py = ny
-                    i++
+                // Drawn twice: an ink underlay, then gold leaf on top.
+                var pass = 0
+                while (pass < 2) {
+                    if (pass == 0) stroke(Color.argb(alpha, 46, 32, 22), 12f)
+                    else stroke(Color.argb(alpha, 250, 226, 136), 6f)
+                    var px = f.x + 60f
+                    var py = f.y - 520f
+                    var i = 1
+                    while (i <= 6) {
+                        val k = i / 6f
+                        val jitter = if (i == 6) 0f else sin(i * 12.9898f + f.x) * 26f
+                        val nx = f.x + 60f * (1f - k) + jitter
+                        val ny = f.y - 520f * (1f - k)
+                        c.drawLine(px, py, nx, ny, paint)
+                        px = nx
+                        py = ny
+                        i++
+                    }
+                    pass++
                 }
-                fill(Color.argb(alpha, 255, 255, 255))
+                fill(Color.argb(alpha, 250, 226, 136))
                 c.drawCircle(f.x, f.y, 26f * (1f - t) + 6f, paint)
             }
             FxKind.BLAST -> {
-                fill(Color.argb((alpha * 0.55f).toInt(), 255, 170, 60))
+                fill(Color.argb((alpha * 0.5f).toInt(), 222, 174, 54))
                 c.drawCircle(f.x, f.y, f.size * (0.4f + 0.6f * t), paint)
-                stroke(Color.argb(alpha, 255, 240, 200), 8f)
+                stroke(Color.argb(alpha, 46, 32, 22), 10f)
+                c.drawCircle(f.x, f.y, f.size * t, paint)
+                stroke(Color.argb(alpha, 196, 52, 36), 5f)
                 c.drawCircle(f.x, f.y, f.size * t, paint)
             }
             FxKind.GUST -> {
@@ -296,7 +578,7 @@ class GameView(context: Context) : View(context) {
                 val len = max(1f, hypot(dx, dy))
                 val nx = -dy / len
                 val ny = dx / len
-                stroke(Color.argb((alpha * 0.8f).toInt(), 255, 255, 255), 5f)
+                stroke(Color.argb((alpha * 0.85f).toInt(), 40, 62, 140), 5f)
                 var i = -2
                 while (i <= 2) {
                     val off = i * f.size * 0.4f
@@ -310,13 +592,25 @@ class GameView(context: Context) : View(context) {
                 }
             }
             FxKind.TEXT -> {
-                val color = if (f.good) Color.argb(alpha, 255, 255, 255) else Color.argb(alpha, 255, 80, 70)
-                text(color, 34f * f.size, Paint.Align.CENTER, true)
-                c.drawText(f.text, f.x.coerceIn(120f, World.W - 120f), f.y - 24f - 60f * t, paint)
+                val tx = f.x.coerceIn(130f, World.W - 130f)
+                val ty = f.y - 30f - 60f * t
+                paint.typeface = serifBold
+                paint.textAlign = Paint.Align.CENTER
+                paint.textSize = 36f * f.size
+                paint.isFakeBoldText = false
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 6f
+                paint.color = Color.argb(alpha, 46, 32, 22)
+                c.drawText(f.text, tx, ty, paint)
+                paint.style = Paint.Style.FILL
+                paint.color = if (f.good) Color.argb(alpha, 250, 226, 136) else Color.argb(alpha, 236, 110, 90)
+                c.drawText(f.text, tx, ty, paint)
             }
             FxKind.ORB -> {
-                fill(Color.argb(alpha, 120, 230, 255))
-                c.drawCircle(f.x, f.y - 14f - 50f * t, 6f, paint)
+                fill(Color.argb(alpha, 250, 226, 136))
+                c.drawCircle(f.x, f.y - 26f - 50f * t, 6f, paint)
+                stroke(Color.argb(alpha, 46, 32, 22), 1.5f)
+                c.drawCircle(f.x, f.y - 26f - 50f * t, 6f, paint)
             }
         }
     }
@@ -332,37 +626,35 @@ class GameView(context: Context) : View(context) {
         val labelY = hudH * 0.38f
         val labelSize = hudH * 0.26f
 
-        text(Color.rgb(150, 225, 250), labelSize, Paint.Align.LEFT, false)
-        c.drawText("PRAYER " + world.prayer.toInt(), pad, labelY, paint)
-        meter(c, pad, barTop, pad + barW, barBottom, world.prayer / World.MAX_PRAYER, Color.rgb(90, 200, 240))
+        label(c, "Prayer " + world.prayer.toInt(), pad, labelY, labelSize, goldLight, Paint.Align.LEFT)
+        meter(c, pad, barTop, pad + barW, barBottom, world.prayer / World.MAX_PRAYER, Color.rgb(88, 116, 210))
 
-        text(Color.rgb(250, 215, 110), labelSize, Paint.Align.RIGHT, false)
-        c.drawText("FAITH " + world.faith.toInt(), w - pad, labelY, paint)
-        meter(c, w - pad - barW, barTop, w - pad, barBottom, world.faith / 100f, Color.rgb(240, 196, 60))
+        label(c, "Faith " + world.faith.toInt(), w - pad, labelY, labelSize, goldLight, Paint.Align.RIGHT)
+        meter(c, w - pad - barW, barTop, w - pad, barBottom, world.faith / 100f, gold)
 
         val secs = world.timeLeft.toInt()
-        val urgent = secs <= 20
-        text(if (urgent) Color.rgb(255, 90, 80) else Color.WHITE, hudH * 0.4f, Paint.Align.CENTER, true)
-        c.drawText((secs / 60).toString() + ":" + (secs % 60).toString().padStart(2, '0'), w / 2f, hudH * 0.5f, paint)
-        text(Color.rgb(220, 150, 170), hudH * 0.24f, Paint.Align.CENTER, false)
-        c.drawText(world.count(Faction.NON_BELIEVER).toString() + " heathens", w / 2f, hudH * 0.84f, paint)
+        val clockText = (secs / 60).toString() + ":" + (secs % 60).toString().padStart(2, '0')
+        label(c, clockText, w / 2f, hudH * 0.5f, hudH * 0.4f, if (secs <= 20) Color.rgb(236, 110, 90) else vellum, Paint.Align.CENTER)
+        plain(c, world.count(Faction.NON_BELIEVER).toString() + " heathens", w / 2f, hudH * 0.84f, hudH * 0.24f, vellumDark, Paint.Align.CENTER)
     }
 
     private fun meter(c: Canvas, l: Float, t: Float, r: Float, b: Float, frac: Float, color: Int) {
         val radius = (b - t) / 2f
-        fill(Color.rgb(50, 46, 60))
+        fill(vellumDark)
         c.drawRoundRect(l, t, r, b, radius, radius, paint)
         val f = frac.coerceIn(0f, 1f)
         if (f > 0.01f) {
             fill(color)
             c.drawRoundRect(l, t, l + max((r - l) * f, radius * 2f), b, radius, radius, paint)
         }
+        stroke(ink, 2.5f)
+        c.drawRoundRect(l, t, r, b, radius, radius, paint)
     }
 
     private fun drawPowerBar(c: Canvas) {
         val top = height - barH
         val slot = width / powers.size.toFloat()
-        val gap = slot * 0.05f
+        val gap = slot * 0.06f
         for (i in powers.indices) {
             val p = powers[i]
             val l = i * slot + gap
@@ -371,78 +663,181 @@ class GameView(context: Context) : View(context) {
             val b = height - gap
             val affordable = world.canAfford(p)
             val isSelected = p == selected
-            fill(if (isSelected) Color.rgb(84, 70, 120) else Color.rgb(44, 40, 56))
-            c.drawRoundRect(l, t, r, b, 18f, 18f, paint)
+            fill(if (isSelected) vellum else vellumDark)
+            c.drawRoundRect(l, t, r, b, 14f, 14f, paint)
+            stroke(if (isSelected) gold else ink, if (isSelected) 7f else 3f)
+            c.drawRoundRect(l, t, r, b, 14f, 14f, paint)
             if (isSelected) {
-                stroke(Color.rgb(250, 215, 110), 5f)
-                c.drawRoundRect(l, t, r, b, 18f, 18f, paint)
+                stroke(ink, 2f)
+                c.drawRoundRect(l - 4f, t - 4f, r + 4f, b + 4f, 16f, 16f, paint)
             }
             val cx = (l + r) / 2f
-            val ink = if (affordable) Color.WHITE else Color.rgb(120, 116, 130)
-            text(ink, barH * 0.26f, Paint.Align.CENTER, true)
-            c.drawText(p.label, cx, t + (b - t) * 0.45f, paint)
-            text(if (affordable) Color.rgb(150, 225, 250) else Color.rgb(120, 116, 130), barH * 0.17f, Paint.Align.CENTER, false)
-            c.drawText(p.cost.toInt().toString() + "  ·  " + p.gesture, cx, t + (b - t) * 0.78f, paint)
+            val inkNow = if (affordable) ink else Color.argb(110, 46, 32, 22)
+            fitted(c, p.label, cx, t + (b - t) * 0.47f, barH * 0.27f, r - l - 16f, inkNow, true)
+            fitted(c, p.cost.toInt().toString() + " · " + p.gesture, cx, t + (b - t) * 0.8f, barH * 0.17f, r - l - 16f, if (affordable) vermilion else inkNow, false)
         }
     }
 
-    // ---------------------------------------------------------------- overlays
+    // ---------------------------------------------------------------- cards
 
-    private fun drawIntro(c: Canvas) {
+    /** A sheet of vellum with a ruled border, for menus and messages. */
+    private fun sheet(c: Canvas, l: Float, t: Float, r: Float, b: Float) {
+        fill(vellum)
+        c.drawRoundRect(l, t, r, b, 18f, 18f, paint)
+        stroke(ink, 4f)
+        c.drawRoundRect(l, t, r, b, 18f, 18f, paint)
+        stroke(vermilion, 3f)
+        c.drawRoundRect(l + 10f, t + 10f, r - 10f, b - 10f, 12f, 12f, paint)
+    }
+
+    private fun stars(count: Int): String = "★".repeat(count) + "☆".repeat(3 - count)
+
+    private fun drawMenu(c: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        fill(Color.argb(215, 16, 14, 22))
+        val m = w * 0.05f
+        sheet(c, m, m, w - m, h - m)
+        stroke(gold, 3f)
+        c.drawRoundRect(m + 18f, m + 18f, w - m - 18f, h - m - 18f, 8f, 8f, paint)
+
+        // Title with a drop capital.
+        val big = w * 0.2f
+        val rest = w * 0.088f
+        paint.typeface = serifBold
+        paint.isFakeBoldText = false
+        paint.style = Paint.Style.FILL
+        paint.textAlign = Paint.Align.LEFT
+        paint.textSize = big
+        val capW = paint.measureText("S")
+        paint.textSize = rest
+        val restW = paint.measureText("mite Them Now")
+        val startX = (w - capW - restW) / 2f
+        val baseY = h * 0.17f
+        fill(ultramarine)
+        c.drawRect(startX - 10f, baseY - big * 0.8f, startX + capW + 6f, baseY + big * 0.08f, paint)
+        stroke(ink, 3f)
+        c.drawRect(startX - 10f, baseY - big * 0.8f, startX + capW + 6f, baseY + big * 0.08f, paint)
+        paint.typeface = serifBold
+        paint.style = Paint.Style.FILL
+        paint.textAlign = Paint.Align.LEFT
+        paint.textSize = big
+        paint.color = goldLight
+        c.drawText("S", startX - 2f, baseY, paint)
+        paint.textSize = rest
+        paint.color = ink
+        c.drawText("mite Them Now", startX + capW + 14f, baseY, paint)
+        fitted(c, "being a Book of Petty Miracles", w / 2f, h * 0.225f, w * 0.045f, w * 0.7f, vermilion, false)
+
+        val cardL = m + w * 0.06f
+        val cardR = w - m - w * 0.06f
+        val cardH = h * 0.155f
+        val first = h * 0.28f
+        for (i in World.LEVELS.indices) {
+            val info = World.LEVELS[i]
+            val t = first + i * (cardH + h * 0.025f)
+            val b = t + cardH
+            cardTop[i] = t
+            cardBottom[i] = b
+            fill(Color.rgb(240, 228, 196))
+            c.drawRoundRect(cardL, t, cardR, b, 14f, 14f, paint)
+            stroke(ink, 3f)
+            c.drawRoundRect(cardL, t, cardR, b, 14f, 14f, paint)
+
+            val roundel = cardH * 0.24f
+            val rx = cardL + roundel + cardH * 0.14f
+            val ry = t + cardH * 0.36f
+            fill(if (i == 2) vermilion else ultramarine)
+            c.drawCircle(rx, ry, roundel, paint)
+            stroke(gold, 4f)
+            c.drawCircle(rx, ry, roundel - 5f, paint)
+            stroke(ink, 2.5f)
+            c.drawCircle(rx, ry, roundel, paint)
+            fitted(c, numerals[i], rx, ry + roundel * 0.36f, roundel * 1.05f, roundel * 1.4f, goldLight, true)
+
+            val textL = rx + roundel + cardH * 0.12f
+            paint.typeface = serifBold
+            paint.style = Paint.Style.FILL
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = ink
+            paint.textSize = cardH * 0.24f
+            shrinkTo(info.title, cardR - textL - 16f)
+            c.drawText(info.title, textL, t + cardH * 0.36f, paint)
+            paint.color = gold
+            paint.textSize = cardH * 0.22f
+            c.drawText(stars(bestStars(i)), textL, t + cardH * 0.62f, paint)
+            fitted(c, info.blurb, (cardL + cardR) / 2f, t + cardH * 0.87f, cardH * 0.15f, cardR - cardL - 32f, ink, false)
+        }
+        fitted(c, "Tap a chapter to begin", w / 2f, h * 0.9f, w * 0.05f, w * 0.7f, vermilion, true)
+    }
+
+    private fun drawBriefing(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val info = World.LEVELS[level]
+        fill(Color.argb(150, 52, 34, 24))
         c.drawRect(0f, 0f, w, h, paint)
-        text(Color.rgb(250, 215, 110), w * 0.105f, Paint.Align.CENTER, true)
-        c.drawText("SMITE THEM NOW", w / 2f, h * 0.24f, paint)
-
-        val lines = arrayOf(
-            "Gold are your Believers. They pray.",
-            "Crimson are heathens. They must go.",
-            "",
-            "Bolt: tap a heathen.",
-            "Meteor: hold until the ring turns white.",
-            "Gust: swipe to shove crowds and fan fires.",
-            "",
-            "Barrels explode. Fire spreads.",
-            "Hurt your own flock and Faith drops.",
-            "Heathens hide among Believers."
-        )
-        text(Color.WHITE, w * 0.043f, Paint.Align.CENTER, false)
-        for (i in lines.indices) c.drawText(lines[i], w / 2f, h * 0.34f + i * w * 0.07f, paint)
-
+        val l = w * 0.07f
+        val r = w * 0.93f
+        val t = h * 0.22f
+        val b = h * 0.74f
+        sheet(c, l, t, r, b)
+        val inner = r - l - 60f
+        fitted(c, "Chapter " + numerals[level], w / 2f, t + (b - t) * 0.12f, w * 0.045f, inner, vermilion, false)
+        fitted(c, info.title, w / 2f, t + (b - t) * 0.25f, w * 0.085f, inner, ink, true)
+        fitted(c, info.blurb, w / 2f, t + (b - t) * 0.35f, w * 0.04f, inner, ink, false)
+        stroke(gold, 3f)
+        c.drawLine(l + 60f, t + (b - t) * 0.41f, r - 60f, t + (b - t) * 0.41f, paint)
+        for (i in info.tips.indices) {
+            fitted(c, info.tips[i], w / 2f, t + (b - t) * (0.52f + 0.085f * i), w * 0.046f, inner, ink, false)
+        }
         val blink = 150 + (105 * (0.5f + 0.5f * sin(clock * 4f))).toInt()
-        text(Color.argb(blink, 150, 225, 250), w * 0.06f, Paint.Align.CENTER, true)
-        c.drawText("Tap to begin", w / 2f, h * 0.86f, paint)
+        fitted(c, "Tap to begin", w / 2f, t + (b - t) * 0.93f, w * 0.055f, inner, Color.argb(blink, 196, 52, 36), true)
     }
 
     private fun drawResult(c: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
         val won = world.outcome == Outcome.VICTORY
-        fill(Color.argb(min(200, (overTime * 400f).toInt()), 16, 14, 22))
+        fill(Color.argb(min(150, (overTime * 300f).toInt()), 52, 34, 24))
         c.drawRect(0f, 0f, w, h, paint)
-        if (overTime < 0.4f) return
+        if (overTime < 0.5f) return
 
-        text(if (won) Color.rgb(250, 215, 110) else Color.rgb(255, 90, 80), w * 0.115f, Paint.Align.CENTER, true)
-        c.drawText(if (won) "ALL SMITTEN" else "DIVINE FAILURE", w / 2f, h * 0.32f, paint)
-
-        text(Color.WHITE, w * 0.05f, Paint.Align.CENTER, false)
+        val l = w * 0.07f
+        val r = w * 0.93f
+        val t = h * 0.2f
+        val b = h * 0.78f
+        sheet(c, l, t, r, b)
+        val inner = r - l - 60f
+        val ph = b - t
+        fitted(c, if (won) "All Smitten" else "Divine Failure", w / 2f, t + ph * 0.17f, w * 0.1f, inner, if (won) ink else vermilion, true)
         if (won) {
-            val stars = world.stars()
-            text(Color.rgb(250, 215, 110), w * 0.13f, Paint.Align.CENTER, true)
-            c.drawText("★".repeat(stars) + "☆".repeat(3 - stars), w / 2f, h * 0.43f, paint)
-            text(Color.WHITE, w * 0.05f, Paint.Align.CENTER, false)
+            fitted(c, stars(world.stars()), w / 2f, t + ph * 0.34f, w * 0.13f, inner, gold, true)
         } else {
-            c.drawText(world.defeatReason, w / 2f, h * 0.41f, paint)
+            fitted(c, world.defeatReason, w / 2f, t + ph * 0.32f, w * 0.05f, inner, ink, false)
         }
-        c.drawText("Smitten: " + world.smitten, w / 2f, h * 0.52f, paint)
-        c.drawText("Believers lost: " + world.believersLost, w / 2f, h * 0.57f, paint)
-        c.drawText("Best chain: x" + world.bestChain, w / 2f, h * 0.62f, paint)
+        stroke(gold, 3f)
+        c.drawLine(l + 60f, t + ph * 0.41f, r - 60f, t + ph * 0.41f, paint)
+        fitted(c, "Smitten: " + world.smitten, w / 2f, t + ph * 0.52f, w * 0.05f, inner, ink, false)
+        fitted(c, "Believers lost: " + world.believersLost, w / 2f, t + ph * 0.61f, w * 0.05f, inner, ink, false)
+        fitted(c, "Best chain: x" + world.bestChain, w / 2f, t + ph * 0.70f, w * 0.05f, inner, ink, false)
 
-        if (overTime > 0.8f) {
-            text(Color.rgb(150, 225, 250), w * 0.06f, Paint.Align.CENTER, true)
-            c.drawText("Tap to smite again", w / 2f, h * 0.76f, paint)
+        buttons = if (won && level < World.LEVELS.size - 1) listOf("Again", "Next", "Chapters") else listOf("Again", "Chapters")
+        buttonTop = t + ph * 0.79f
+        buttonBottom = t + ph * 0.93f
+        if (overTime < 0.8f) return
+        val slot = w / buttons.size
+        for (i in buttons.indices) {
+            val bl = max(l + 30f, i * slot + slot * 0.08f)
+            val br = min(r - 30f, (i + 1) * slot - slot * 0.08f)
+            val primary = buttons[i] == "Next" || (buttons.size == 2 && i == 0)
+            fill(if (primary) ultramarine else vellumDark)
+            c.drawRoundRect(bl, buttonTop, br, buttonBottom, 14f, 14f, paint)
+            stroke(ink, 3f)
+            c.drawRoundRect(bl, buttonTop, br, buttonBottom, 14f, 14f, paint)
+            fitted(
+                c, buttons[i], (bl + br) / 2f, buttonTop + (buttonBottom - buttonTop) * 0.66f,
+                w * 0.05f, br - bl - 20f, if (primary) goldLight else ink, true
+            )
         }
     }
 
@@ -460,11 +855,44 @@ class GameView(context: Context) : View(context) {
         paint.color = color
     }
 
-    private fun text(color: Int, size: Float, align: Paint.Align, bold: Boolean) {
+    /** Bold serif text. */
+    private fun label(c: Canvas, s: String, x: Float, y: Float, size: Float, color: Int, align: Paint.Align) {
+        paint.typeface = serifBold
+        paint.isFakeBoldText = false
         paint.style = Paint.Style.FILL
         paint.color = color
         paint.textSize = size
         paint.textAlign = align
-        paint.isFakeBoldText = bold
+        c.drawText(s, x, y, paint)
+    }
+
+    /** Regular serif text. */
+    private fun plain(c: Canvas, s: String, x: Float, y: Float, size: Float, color: Int, align: Paint.Align) {
+        paint.typeface = serif
+        paint.isFakeBoldText = false
+        paint.style = Paint.Style.FILL
+        paint.color = color
+        paint.textSize = size
+        paint.textAlign = align
+        c.drawText(s, x, y, paint)
+    }
+
+    /** Centred serif text that shrinks to fit [maxWidth]. */
+    private fun fitted(c: Canvas, s: String, x: Float, y: Float, size: Float, maxWidth: Float, color: Int, bold: Boolean) {
+        paint.typeface = if (bold) serifBold else serif
+        paint.isFakeBoldText = false
+        paint.style = Paint.Style.FILL
+        paint.color = color
+        paint.textSize = size
+        paint.textAlign = Paint.Align.CENTER
+        shrinkTo(s, maxWidth)
+        c.drawText(s, x, y, paint)
+    }
+
+    private fun shrinkTo(s: String, maxWidth: Float) {
+        val measured = paint.measureText(s)
+        if (measured > maxWidth && measured > 0f && maxWidth > 0f) {
+            paint.textSize = paint.textSize * maxWidth / measured
+        }
     }
 }

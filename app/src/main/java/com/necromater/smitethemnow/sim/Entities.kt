@@ -13,7 +13,8 @@ enum class Mood { CALM, ZEALOT, TERROR, SPOOKED }
 enum class Power(val label: String, val cost: Float, val gesture: String) {
     LIGHTNING("Bolt", 12f, "tap"),
     METEOR("Meteor", 35f, "hold"),
-    GUST("Gust", 8f, "swipe")
+    GUST("Gust", 8f, "swipe"),
+    SHIELD("Shield", 15f, "tap")
 }
 
 enum class Outcome { PLAYING, VICTORY, DEFEAT }
@@ -38,11 +39,25 @@ class Npc(var x: Float, var y: Float, val faction: Faction) {
     /** Seconds spent standing in fire. */
     var heat = 0f
     var orbClock = 0f
+    /** Throttles the "SPARED" pop-up while a shielded Believer stands in harm's way. */
+    var sparedClock = 0f
 }
 
-class Building(val x: Float, val y: Float, val w: Float, val h: Float) {
+class Building(val x: Float, val y: Float, val w: Float, val h: Float, val holy: Boolean = false) {
     var standing = true
 }
+
+/** A Miracle Shield: Believers standing inside cannot be harmed while it lasts. */
+class Shield(val x: Float, val y: Float, val radius: Float, var ttl: Float)
+
+/** A Lightning Rod: swallows any Bolt cast inside its ring until it overloads. */
+class Rod(val x: Float, val y: Float) {
+    var alive = true
+    var charges = 0
+}
+
+/** What the level-select screen and the briefing card show. */
+class LevelInfo(val title: String, val blurb: String, val tips: List<String>)
 
 class Barrel(val x: Float, val y: Float) {
     var alive = true

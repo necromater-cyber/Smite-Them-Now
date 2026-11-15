@@ -8,17 +8,17 @@ import kotlin.random.Random
 
 /**
  * One micro-scenario: a village diorama, a flock, some heathens and a clock.
+ * [level] picks one of the layouts described in [LEVELS].
  *
  * Coordinates are logical units (W x H), top-down, y pointing down the screen.
  * The view scales this to whatever phone it runs on.
  */
-class World(seed: Long = 7L) {
+class World(val level: Int = 1, seed: Long = 7L) {
 
     companion object {
         const val W = 1000f
         const val H = 1400f
 
-        const val TIME_LIMIT = 150f
         const val MAX_PRAYER = 100f
         const val START_PRAYER = 30f
 
@@ -49,6 +49,48 @@ class World(seed: Long = 7L) {
         const val BURN_TIME = 0.3f
         const val NPC_RADIUS = 11f
         const val MAX_FIRES = 60
+
+        const val SHIELD_RADIUS = 115f
+        const val SHIELD_TIME = 6f
+
+        /** Bolts cast within this distance of a rod are swallowed by it. */
+        const val ROD_RADIUS = 230f
+        /** Bolts a rod can swallow before it overloads and explodes. */
+        const val ROD_CAPACITY = 3
+        const val ROD_BLAST = 95f
+
+        val LEVELS: List<LevelInfo> = listOf(
+            LevelInfo(
+                "A Gentle Smiting",
+                "A quiet hamlet. A few doubters. Begin here.",
+                listOf(
+                    "Choose Bolt, then tap a heathen.",
+                    "Smite one beside a Believer and",
+                    "the Believer prays twice as fast.",
+                    "Lightning also sets off barrels."
+                )
+            ),
+            LevelInfo(
+                "Market Day",
+                "Crowds, oil barrels, and nowhere safe to aim.",
+                listOf(
+                    "Hold Meteor until the ring is whole.",
+                    "Swipe Gust through fire to drive it.",
+                    "Heathens hide among your flock:",
+                    "Shield the flock, then let fly."
+                )
+            ),
+            LevelInfo(
+                "The Defiant",
+                "They have built Lightning Rods. The nerve.",
+                listOf(
+                    "A rod swallows any Bolt in its ring.",
+                    "Three Bolts overload it. Blasts",
+                    "and Meteors fell it at once.",
+                    "Barrels outside a ring still spark."
+                )
+            )
+        )
     }
 
     private val rng = Random(seed)
@@ -58,6 +100,8 @@ class World(seed: Long = 7L) {
     val barrels = ArrayList<Barrel>()
     val fires = ArrayList<Fire>()
     val fx = ArrayList<Fx>()
+    val shields = ArrayList<Shield>()
+    val rods = ArrayList<Rod>()
 
     /** Mana. Believers generate it, powers spend it. */
     var prayer = START_PRAYER
@@ -67,7 +111,9 @@ class World(seed: Long = 7L) {
     var faith = 100f
         private set
 
-    var timeLeft = TIME_LIMIT
+    var timeLimit = 150f
+        private set
+    var timeLeft = 0f
         private set
     var outcome = Outcome.PLAYING
         private set
@@ -99,13 +145,66 @@ class World(seed: Long = 7L) {
         private set
 
     init {
-        buildLevel()
+        when (level) {
+            0 -> buildHamlet()
+            2 -> buildDefiant()
+            else -> buildMarket()
+        }
+        timeLeft = timeLimit
     }
 
     // ---------------------------------------------------------------- level
 
-    private fun buildLevel() {
-        buildings += Building(90f, 880f, 200f, 130f)    // chapel
+    /** Level 0: one flock, a handful of heathens, one easy barrel pair. */
+    private fun buildHamlet() {
+        timeLimit = 120f
+        buildings += Building(110f, 960f, 200f, 130f, holy = true)
+        buildings += Building(640f, 250f, 180f, 120f)
+        buildings += Building(160f, 420f, 150f, 110f)
+
+        spawnGroup(Faction.BELIEVER, 6, 280f, 1200f, 70f)
+
+        spawnGroup(Faction.NON_BELIEVER, 4, 680f, 520f, 70f)
+        spawnGroup(Faction.NON_BELIEVER, 2, 380f, 700f, 40f)
+        spawnGroup(Faction.NON_BELIEVER, 1, 800f, 1000f, 20f)
+        spawnGroup(Faction.NON_BELIEVER, 1, 480f, 240f, 20f)
+        // One loiterer beside the flock: the first Zealotry lesson.
+        spawnGroup(Faction.NON_BELIEVER, 1, 400f, 1130f, 10f)
+
+        barrels += Barrel(640f, 610f)
+        barrels += Barrel(720f, 630f)
+    }
+
+    /** Level 2: three Lightning Rods guard the heathen quarters. */
+    private fun buildDefiant() {
+        timeLimit = 165f
+        buildings += Building(60f, 110f, 190f, 110f, holy = true)
+        buildings += Building(620f, 200f, 180f, 110f)
+        buildings += Building(840f, 1060f, 130f, 120f)
+        buildings += Building(60f, 980f, 170f, 120f)
+
+        spawnGroup(Faction.BELIEVER, 4, 170f, 310f, 55f)
+        spawnGroup(Faction.BELIEVER, 5, 500f, 1150f, 65f)
+
+        rods += Rod(740f, 420f)
+        rods += Rod(300f, 760f)
+        rods += Rod(760f, 900f)
+
+        spawnGroup(Faction.NON_BELIEVER, 7, 740f, 470f, 90f)
+        spawnGroup(Faction.NON_BELIEVER, 6, 300f, 800f, 80f)
+        spawnGroup(Faction.NON_BELIEVER, 5, 760f, 930f, 80f)
+
+        // The first barrel sits just outside every ring. The last one sits next to a rod.
+        barrels += Barrel(560f, 600f)
+        barrels += Barrel(480f, 650f)
+        barrels += Barrel(400f, 700f)
+        barrels += Barrel(330f, 740f)
+    }
+
+    /** Level 1: the original market village. */
+    private fun buildMarket() {
+        timeLimit = 150f
+        buildings += Building(90f, 880f, 200f, 130f, holy = true)    // chapel
         buildings += Building(610f, 1060f, 220f, 140f)  // tavern
         buildings += Building(140f, 250f, 180f, 120f)   // market hall
         buildings += Building(700f, 170f, 170f, 120f)   // shrine
@@ -168,6 +267,28 @@ class World(seed: Long = 7L) {
         return s
     }
 
+    fun isShielded(n: Npc): Boolean {
+        if (n.faction != Faction.BELIEVER) return false
+        for (s in shields) {
+            if (dist2(n.x, n.y, s.x, s.y) < s.radius * s.radius) return true
+        }
+        return false
+    }
+
+    private fun rodCovering(x: Float, y: Float): Rod? {
+        var best: Rod? = null
+        var bestD = ROD_RADIUS * ROD_RADIUS
+        for (r in rods) {
+            if (!r.alive) continue
+            val d = dist2(x, y, r.x, r.y)
+            if (d < bestD) {
+                bestD = d
+                best = r
+            }
+        }
+        return best
+    }
+
     private fun nearestBeliever(x: Float, y: Float): Npc? {
         var best: Npc? = null
         var bestD = Float.MAX_VALUE
@@ -188,13 +309,28 @@ class World(seed: Long = 7L) {
     fun castLightning(x: Float, y: Float): Boolean {
         if (outcome != Outcome.PLAYING) return false
         if (!spend(Power.LIGHTNING, x, y)) return false
-        fx += Fx(FxKind.BOLT, x, y, x, y, 1f, 0.28f)
         shake = max(shake, 0.12f)
+
+        val rod = rodCovering(x, y)
+        if (rod != null) {
+            // The rod takes the strike. Enough of them and it cooks.
+            fx += Fx(FxKind.BOLT, rod.x, rod.y, rod.x, rod.y, 1f, 0.28f)
+            rod.charges++
+            if (rod.charges >= ROD_CAPACITY) {
+                rod.alive = false
+                fx += Fx(FxKind.TEXT, rod.x, rod.y, rod.x, rod.y, 1.2f, 1.2f, "OVERLOAD", true)
+                explode(rod.x, rod.y, ROD_BLAST, 45f, 2.5f)
+            } else {
+                fx += Fx(FxKind.TEXT, x, y, x, y, 1f, 0.9f, "GROUNDED", false)
+            }
+            return true
+        }
+        fx += Fx(FxKind.BOLT, x, y, x, y, 1f, 0.28f)
 
         var best: Npc? = null
         var bestD = BOLT_RADIUS * BOLT_RADIUS
         for (n in npcs) {
-            if (!n.alive) continue
+            if (!n.alive || isShielded(n)) continue
             val d = dist2(x, y, n.x, n.y)
             if (d < bestD) {
                 bestD = d
@@ -276,6 +412,14 @@ class World(seed: Long = 7L) {
         return true
     }
 
+    /** Tap. Believers inside the circle cannot be harmed until it fades. Heathens can. */
+    fun castShield(x: Float, y: Float): Boolean {
+        if (outcome != Outcome.PLAYING) return false
+        if (!spend(Power.SHIELD, x, y)) return false
+        shields += Shield(x, y, SHIELD_RADIUS, SHIELD_TIME)
+        return true
+    }
+
     private fun spend(power: Power, x: Float, y: Float): Boolean {
         if (prayer < power.cost) {
             fx += Fx(FxKind.TEXT, x, y, x, y, 1f, 0.9f, "MORE PRAYER", false)
@@ -300,6 +444,12 @@ class World(seed: Long = 7L) {
         for (b in barrels) {
             if (b.alive && dist2(x, y, b.x, b.y) < r2) lightFuse(b, 0.18f)
         }
+        for (r in rods) {
+            if (r.alive && dist2(x, y, r.x, r.y) < r2) {
+                r.alive = false
+                fx += Fx(FxKind.TEXT, r.x, r.y, r.x, r.y, 1.1f, 1.1f, "ROD FELLED", true)
+            }
+        }
         addFire(Fire(x, y, fireRadius, fireTtl))
     }
 
@@ -313,6 +463,13 @@ class World(seed: Long = 7L) {
 
     private fun kill(n: Npc) {
         if (!n.alive) return
+        if (isShielded(n)) {
+            if (n.sparedClock <= 0f) {
+                n.sparedClock = 1.2f
+                fx += Fx(FxKind.TEXT, n.x, n.y, n.x, n.y, 0.9f, 0.9f, "SPARED", true)
+            }
+            return
+        }
         n.alive = false
         if (n.faction == Faction.NON_BELIEVER) {
             chain = if (chainClock > 0f) chain + 1 else 1
@@ -371,6 +528,12 @@ class World(seed: Long = 7L) {
         }
         if (charging) charge = min(1f, charge + dt / METEOR_CHARGE_TIME)
 
+        var si = shields.size - 1
+        while (si >= 0) {
+            shields[si].ttl -= dt
+            if (shields[si].ttl <= 0f) shields.removeAt(si)
+            si--
+        }
         updateBarrels(dt)
         updateFires(dt)
         updateNpcs(dt)
@@ -435,6 +598,7 @@ class World(seed: Long = 7L) {
             val n = npcs[i]
             if (!n.alive) continue
 
+            if (n.sparedClock > 0f) n.sparedClock -= dt
             if (n.moodTime > 0f) {
                 n.moodTime -= dt
                 if (n.moodTime <= 0f) n.mood = Mood.CALM

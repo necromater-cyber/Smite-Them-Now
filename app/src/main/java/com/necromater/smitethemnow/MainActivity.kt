@@ -5,9 +5,22 @@ import android.os.Bundle
 import android.view.WindowManager
 
 class MainActivity : Activity() {
+
+    private lateinit var game: GameView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContentView(GameView(this))
+        game = GameView(this)
+        setContentView(game)
+    }
+
+    /** Back leaves a level for the chapter list. On the chapter list it closes the app. */
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (!game.handleBack()) {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
+        }
     }
 }

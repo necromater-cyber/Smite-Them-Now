@@ -27,9 +27,11 @@ Working title. Living document: sections marked **Open** are undecided.
 | Area | Meteor Shower (fire, wide radius) | Press and hold | Yes, as a single Meteor |
 | Area | Earthquake (collapses buildings, tosses NPCs) | Open | No |
 | Control | Shepherd's Gust (directional wind) | Swipe | Yes |
-| Control | Miracle Shield (protects Believers) | Open | No |
+| Control | Miracle Shield (protects Believers) | Tap | Yes |
 | Control | Conversion Beam | Open | No |
 | Utility | Rain cloud (see combo 2) | Pinch to spread | No |
+
+**Miracle Shield, as built:** a circle that lasts 6 seconds. Believers inside cannot be harmed by Bolts, blasts or fire. Non-Believers inside get no protection, so a Shield followed by a Meteor is the answer to human shields, and it pays out in Zealots.
 
 ## 4. Crowd AI
 
@@ -73,7 +75,14 @@ Kills in quick succession form a chain. Each extra link pays more Prayer. This f
 - **Defiant Civilization (reverse tower defense):** Non-Believers build Lightning Rods, Anti-Magic Ward Totems and Inquisitors.
 - **Apocalypse / Escort:** protect migrating Believers through hostile terrain and raiders.
 
-None of these are in the proof of concept. It has passive Non-Believers only.
+**In the proof of concept:** a first slice of the Defiant Civilization. Chapter III has pre-built Lightning Rods:
+
+- A rod swallows any Bolt cast inside its ring (230 units). The Bolt is still paid for.
+- Three swallowed Bolts overload the rod. It explodes and takes nearby heathens with it.
+- A Meteor or barrel blast fells a rod at once.
+- Rods do nothing about Meteors, wind or fire.
+
+Not built yet: heathens constructing rods during play, Ward Totems, Inquisitors, the Rival God and Escort modes.
 
 ## 7. Meta-progression
 
@@ -81,21 +90,31 @@ Between levels the player shapes their religion's playstyle: Benevolent Shepherd
 
 ## 8. Art direction
 
-**Open.** The view is 2D top-down. Three candidate styles, each needing a top-down adaptation:
+**Decided: illuminated manuscript.** Each level is a page from a medieval book of petty miracles.
 
-- **Toybox Diorama:** chunky, tilt-shift, peg-like NPCs. Gleeful, consequence-free destruction.
-- **Illuminated Manuscript:** medieval painted look, gold-leaf spells. Humour from mock-solemnity.
-- **Saturday-Morning Cartoon:** bold outlines, big readable expressions. Slapstick first.
+- **Page:** stained vellum with a ruled border in ink, vermilion and gold, and roundels at the corners.
+- **Palette:** ink brown, vellum, vermilion, ultramarine, gold leaf, murrey. Nothing outside it.
+- **Figures:** flat marginalia. Believers wear ultramarine robes and a gold halo. Heathens wear murrey and a pointed black hood. Terrified Believers lose the halo and go grey. Zealots raise their arms and radiate.
+- **Buildings:** drawn flat and front-on, as manuscripts do, even though the map is top-down. Holy buildings have a blue roof and a gold cross, others a vermilion roof.
+- **Spells:** gold leaf with an ink underlay. Lightning is a gold zigzag, a Shield is a gold ring, fire is vermilion tongues with gold hearts.
+- **Type:** serif throughout, with a drop capital on the title.
+- **Humour:** mock-solemnity. Holy art recording very small-minded acts.
 
-Also open: whether the god is visible (a hand, a face in the clouds) or an unseen force.
+Everything is drawn in code for now. Hand-painted assets come later.
 
-The proof of concept uses flat placeholder shapes on a parchment-coloured ground. That is not a style decision.
+**Open:** whether the god is visible (a hand, a face in the clouds) or an unseen force.
 
 ## 9. Proof of concept
 
 **Purpose:** find out whether tap, hold and swipe feel good on a phone, and whether human shields, Zealotry and barrel chains produce interesting decisions in a 2–3 minute round.
 
-**Scope:** one level, 10 Believers in two flocks, 20 Non-Believers, 7 barrels, 5 buildings, three powers, a 2:30 timer, win and lose screens with a star rating.
+**Scope:** three chapters chosen from a chapter list, four powers, a briefing card per chapter, win and lose cards with a star rating, best stars saved per chapter.
+
+| Chapter | Believers | Non-Believers | Barrels | Rods | Time |
+|---|---|---|---|---|---|
+| I. A Gentle Smiting | 6 | 9 | 2 | 0 | 2:00 |
+| II. Market Day | 10 | 20 | 7 | 0 | 2:30 |
+| III. The Defiant | 9 | 18 | 4 | 3 | 2:45 |
 
 **Tuning values** (all at the top of `sim/World.kt`):
 
@@ -103,13 +122,14 @@ The proof of concept uses flat placeholder shapes on a parchment-coloured ground
 |---|---|
 | Starting Prayer / maximum | 30 / 100 |
 | Prayer per calm Believer | 0.35 per second (Zealot: double) |
-| Bolt / Meteor / Gust cost | 12 / 35 / 8 |
+| Bolt / Meteor / Gust / Shield cost | 12 / 35 / 8 / 15 |
+| Shield radius / duration | 115 units / 6 s |
+| Rod ring / Bolts to overload | 230 units / 3 |
 | Meteor charge time | 0.9 s; Non-Believers react once it is 35% charged |
 | Faith lost per Believer killed | 25 of 100 |
 | Zealot duration / Terror duration | 6 s / 5 s |
-| Time limit | 150 s |
 
-These numbers have only been checked with a scripted bot, which clears the level in 30–50 seconds with perfect aim. They have not been played by a person yet and will need adjusting.
+A scripted bot with perfect aim, using only Bolts, clears chapter I in about 30 seconds, II in 35–50 and III in 40–65. Chapter II has been played on an emulator and felt good. Chapters I and III, the Shield and the rods have not been played by a person yet.
 
 ## 10. Decisions log
 
@@ -121,7 +141,14 @@ These numbers have only been checked with a scripted bot, which clears the level
 | 2026-11-15 | Powers are chosen on a bottom bar, then cast with their gesture | Keeps each gesture unambiguous. Worth testing against a no-bar scheme where the gesture alone picks the power. |
 | 2026-11-15 | Prayer is collected automatically | Keeps attention on smiting. Tapping orbs to collect them is an option to test later. |
 
+| 2026-11-15 | Illuminated manuscript art style | Flat figures read well from above, gold-leaf spells suit the tone, and it is cheap to produce in 2D. |
+| 2026-11-15 | Shields are fixed circles that protect Believers only | Makes Shield the direct counter to human shields without making the flock invulnerable on the move. |
+| 2026-11-15 | Rods can be brute-forced with three Bolts | A player who has not found the clever route is slowed, not stuck. |
+| 2026-11-15 | Build on Gradle 8.14.3, Android Gradle plugin 8.13.2, Gradle JDK 21 | What the designer's Android Studio accepted. |
+
 ## 11. Ideas backlog
+
+- Heathens who build and repair rods mid-level, so the Defiant chapter fights back.
 
 - Pre-Smite Preview: press and hold to see the consequence before release.
 - Poetic Justice bonuses for ironic kills.
