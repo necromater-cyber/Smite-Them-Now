@@ -20,7 +20,10 @@ class World(
     seed: Long = 7L,
     val doctrine: Doctrine = Doctrine.NONE,
     /** Which Holy War map: 0 Two Hills, 1 The Ford, 2 Walled Town. */
-    val map: Int = 0
+    val map: Int = 0,
+    val rival: RivalGod = RivalGod.VORN,
+    /** The miracles brought to a Holy War. Null means the standard five. */
+    deck: List<Power>? = null
 ) {
 
     companion object {
@@ -141,6 +144,13 @@ class World(
         private const val BY_ARMAGEDDON = 4
 
         const val HOLY_WAR = 5
+
+        const val QUAKE_RADIUS = 220f
+        const val ANVIL_RADIUS = 46f
+        const val BEAM_REACH = 60f
+        const val WHISPER_COST = 16f
+        const val WHISPER_WARNING = 2.2f
+        const val INQUISITOR_COST = 26f
 
         /** Seconds of fire against a wall before it cracks. */
         const val SCORCH_TIME = 2.5f
@@ -285,6 +295,32 @@ class World(
     var armageddon = false
         private set
     private var armageddonClock = 0f
+    // How this rival god plays. Set from [rival] when a Holy War starts.
+    var rivalBoltCost = RIVAL_BOLT_COST
+        private set
+    var rivalMeteorCost = RIVAL_METEOR_COST
+        private set
+    private var rivalBoltWarning = RIVAL_BOLT_WARNING
+    private var rivalWardCost = RIVAL_WARD_COST
+    private var rivalWardEvery = 12f
+    private var rivalGustEvery = 11f
+    private var heathenBuildInterval = HEATHEN_BUILD_INTERVAL
+    private var heathenSpawnInterval = SPAWN_INTERVAL
+    private var heathenHouseHp = HOUSE_HP
+    private var heathenMaxHouses = MAX_HOUSES
+
+    /** Sounds waiting to be played. The app empties this every frame. */
+    val cues = ArrayList<Cue>()
+
+    private fun cue(c: Cue) {
+        if (cues.size < 24) cues += c
+    }
+
+    /** Which power the current press-and-hold is charging. */
+    var chargePower = Power.METEOR
+        private set
+    val chargeRadius: Float get() = if (chargePower == Power.QUAKE) QUAKE_RADIUS else METEOR_RADIUS
+
     private var wardCooldown = 6f
     private var rivalGustCooldown = 8f
     private var tauntClock = 0f
@@ -299,9 +335,11 @@ class World(
 
     /** The powers on offer. Rally only exists in Holy War. */
     val powers: List<Power>
-        get() = if (holyWar) allPowers else chapterPowers
-    private val allPowers = Power.values().toList()
-    private val chapterPowers = allPowers.filter { it != Power.RALLY }
+        get() = if (holyWar) warPowers else chapterPowers
+    private val chapterPowers = listOf(Power.LIGHTNING, Power.METEOR, Power.GUST, Power.SHIELD)
+    private val warPowers: List<Power> =
+        if (deck != null && deck.isNotEmpty()) deck
+        else listOf(Power.LIGHTNING, Power.METEOR, Power.GUST, Power.SHIELD, Power.RALLY)
 
     /** Divine Fatigue. Whole steps raise the price of the next Bolt. */
     var fatigue = 0f
@@ -531,6 +569,26 @@ class World(
         holyWar = true
         sheltering = true
         fatigueOn = true
+        when (rival) {
+            RivalGod.VORN -> {
+                rivalBoltCost = 16f
+                rivalBoltWarning = 1.4f
+            }
+            RivalGod.BRICK -> {
+                rivalBoltCost = 26f
+                heathenBuildInterval = 9f
+                heathenSpawnInterval = 11f
+                heathenHouseHp = 4
+                heathenMaxHouses = 6
+            }
+            RivalGod.GENERAL -> rivalBoltCost = 28f
+            RivalGod.SLYBOOTS -> {
+                rivalBoltCost = 24f
+                rivalGustEvery = 5f
+                rivalWardEvery = 6f
+                rivalWardCost = 8f
+            }
+        }
 
         // Your side is the same on every map.
         buildings += Building(400f, y(1150f), 200f, 130f, true, Faction.BELIEVER)
@@ -586,8 +644,8 @@ class World(
         leader(Faction.BELIEVER, 540f, 1310f)
         for (b in buildings) {
             if (b.owner == null) continue
-            b.hp = HOUSE_HP
-            b.spawnClock = SPAWN_INTERVAL * (0.5f + rng.nextFloat() * 0.5f)
+            b.hp = if (b.owner == Faction.NON_BELIEVER) heathenHouseHp else HOUSE_HP
+            b.spawnClock = spawnEvery(b.owner) * (0.5f + rng.nextFloat() * 0.5f)
         }
     }
 
@@ -716,6 +774,7 @@ class World(
         if (outcome != Outcome.PLAYING) return false
         if (!spend(Power.LIGHTNING, x, y)) return false
         if (fatigueOn) fatigue = min(FATIGUE_CAP.toFloat(), fatigue + 1f)
+        cue(Cue.ZAP)
         shake = max(shake, 0.12f)
 
         val rod = rodCovering(x, y)
@@ -758,12 +817,14 @@ class World(
     }
 
     /** Press and hold. Everyone can see it coming, which is the point. */
-    fun beginCharge(x: Float, y: Float): Boolean {
+    fun beginCharge(x: Float, y: Float, power: Power = Power.METEOR): Boolean {
         if (outcome != Outcome.PLAYING) return false
-        if (!canAfford(Power.METEOR)) {
+        if (!canAfford(power)) {
             fx += Fx(FxKind.TEXT, x, y, x, y, 1f, 0.9f, "MORE PRAYER", false)
+            cue(Cue.DENY)
             return false
         }
+        chargePower = power
         charging = true
         charge = 0f
         chargeX = x
@@ -786,9 +847,81 @@ class World(
             fx += Fx(FxKind.TEXT, chargeX, chargeY, chargeX, chargeY, 1f, 0.8f, "FIZZLE", false)
             return
         }
-        if (!spend(Power.METEOR, chargeX, chargeY)) return
-        explode(chargeX, chargeY, METEOR_RADIUS, 85f, 4.5f, true)
-        shake = max(shake, 0.5f)
+        if (!spend(chargePower, chargeX, chargeY)) return
+        if (chargePower == Power.QUAKE) {
+            quake(chargeX, chargeY)
+        } else {
+            explode(chargeX, chargeY, METEOR_RADIUS, 85f, 4.5f, true)
+            shake = max(shake, 0.5f)
+        }
+    }
+
+    /** Earthquake: kills nobody, cracks every building in reach, yours included, and throws people about. */
+    private fun quake(x: Float, y: Float) {
+        fx += Fx(FxKind.BLAST, x, y, x, y, QUAKE_RADIUS, 0.7f)
+        shake = max(shake, 0.9f)
+        cue(Cue.CRUMBLE)
+        for (b in buildings) {
+            if (b.standing && distToRect(x, y, b) < QUAKE_RADIUS) damage(b, 1)
+        }
+        for (r in rods) {
+            if (r.alive && dist2(x, y, r.x, r.y) < QUAKE_RADIUS * QUAKE_RADIUS) fellRod(r, "ROD FELLED")
+        }
+        for (n in npcs) {
+            if (!n.alive || n.inside != null || dist2(x, y, n.x, n.y) > QUAKE_RADIUS * QUAKE_RADIUS) continue
+            n.pushX += (rng.nextFloat() - 0.5f) * 700f
+            n.pushY += (rng.nextFloat() - 0.5f) * 700f
+            if (n.faction == Faction.NON_BELIEVER && n.isFollower) {
+                n.mood = Mood.SPOOKED
+                n.moodTime = 3f
+            }
+        }
+    }
+
+    /** Divine Anvil. Tap: small, instant, heavy. Flattens whoever is under it and ignores rods and wards on people. */
+    fun castAnvil(x: Float, y: Float): Boolean {
+        if (outcome != Outcome.PLAYING) return false
+        if (!spend(Power.ANVIL, x, y)) return false
+        fx += Fx(FxKind.BLAST, x, y, x, y, ANVIL_RADIUS * 1.3f, 0.35f)
+        shake = max(shake, 0.4f)
+        cue(Cue.BOOM)
+        for (n in npcs) {
+            if (n.alive && n.inside == null && dist2(x, y, n.x, n.y) < ANVIL_RADIUS * ANVIL_RADIUS) kill(n)
+        }
+        for (b in buildings) {
+            if (b.standing && distToRect(x, y, b) < 12f) damage(b, 2)
+        }
+        for (b in barrels) {
+            if (b.alive && dist2(x, y, b.x, b.y) < ANVIL_RADIUS * ANVIL_RADIUS) lightFuse(b, 0.05f)
+        }
+        for (r in rods) {
+            if (r.alive && dist2(x, y, r.x, r.y) < ANVIL_RADIUS * ANVIL_RADIUS) fellRod(r, "ROD FELLED")
+        }
+        return true
+    }
+
+    /** Conversion Beam. Tap a heathen follower: they are yours now. Costs nothing if nobody is there. */
+    fun castBeam(x: Float, y: Float): Boolean {
+        if (outcome != Outcome.PLAYING) return false
+        var best: Npc? = null
+        var bestD = BEAM_REACH * BEAM_REACH
+        for (n in npcs) {
+            if (!n.alive || n.inside != null || n.faction != Faction.NON_BELIEVER || !n.isFollower) continue
+            val d = dist2(x, y, n.x, n.y)
+            if (d < bestD) {
+                bestD = d
+                best = n
+            }
+        }
+        if (best == null) {
+            fx += Fx(FxKind.TEXT, x, y, x, y, 1f, 0.9f, "NO ONE TO SAVE", false)
+            cue(Cue.DENY)
+            return false
+        }
+        if (!spend(Power.BEAM, x, y)) return false
+        fx += Fx(FxKind.BOLT, best.x, best.y, best.x, best.y, 1f, 0.35f)
+        convert(best, "CONVERTED")
+        return true
     }
 
     fun cancelCharge() {
@@ -806,6 +939,7 @@ class World(
         val ux = dx / len
         val uy = dy / len
         fx += Fx(FxKind.GUST, x1, y1, x2, y2, GUST_WIDTH, 0.55f)
+        cue(Cue.WHOOSH)
 
         for (n in npcs) {
             if (!n.alive || n.inside != null) continue
@@ -831,6 +965,7 @@ class World(
         if (outcome != Outcome.PLAYING) return false
         if (!spend(Power.SHIELD, x, y)) return false
         shields += Shield(x, y, SHIELD_RADIUS, SHIELD_TIME)
+        cue(Cue.SHIELD)
         return true
     }
 
@@ -839,6 +974,7 @@ class World(
         if (outcome != Outcome.PLAYING || !holyWar) return false
         if (!spend(Power.RALLY, x, y)) return false
         banner = Banner(x, y, RALLY_TIME)
+        cue(Cue.HORN)
         fx += Fx(FxKind.TEXT, x, y, x, y, 1.1f, 1.1f, "TO THE BANNER", true)
         return true
     }
@@ -846,6 +982,7 @@ class World(
     private fun spend(power: Power, x: Float, y: Float): Boolean {
         val cost = costOf(power)
         if (prayer < cost) {
+            cue(Cue.DENY)
             fx += Fx(FxKind.TEXT, x, y, x, y, 1f, 0.9f, "MORE PRAYER", false)
             return false
         }
@@ -858,6 +995,7 @@ class World(
     /** [heavy] is a Meteor: a direct hit levels a sound building in one go. */
     private fun explode(x: Float, y: Float, radius: Float, fireRadius: Float, fireTtl: Float, heavy: Boolean) {
         fx += Fx(FxKind.BLAST, x, y, x, y, radius, 0.45f)
+        cue(Cue.BOOM)
         shake = max(shake, 0.3f)
         val r2 = radius * radius
         for (n in npcs) {
@@ -895,6 +1033,7 @@ class World(
 
         // Down it comes, on whoever was leaning against it.
         b.standing = false
+        cue(Cue.CRUMBLE)
         val cx = b.x + b.w / 2f
         val cy = b.y + b.h / 2f
         fx += Fx(FxKind.BLAST, cx, cy, cx, cy, max(b.w, b.h) * 0.75f, 0.6f)
@@ -963,6 +1102,7 @@ class World(
             chainClock = CHAIN_WINDOW
             bestChain = max(bestChain, chain)
             smitten++
+            cue(Cue.SMITE)
             val chainPay = if (doctrine == Doctrine.TRICKSTER) 2f * min(chain - 1, 10) else CHAIN_BONUS * min(chain - 1, CHAIN_BONUS_CAP)
             prayer = min(MAX_PRAYER, prayer + KILL_REWARD + chainPay)
             if (n.isLeader) {
@@ -981,6 +1121,7 @@ class World(
             witnessed += floatArrayOf(n.x, n.y, 1f)
         } else {
             believersLost++
+            cue(Cue.LOSS)
             chain = 0
             chainClock = 0f
             if (cause == BY_ARMAGEDDON) {
@@ -1054,6 +1195,7 @@ class World(
     }
 
     private fun convert(n: Npc, label: String) {
+        cue(Cue.CONVERT)
         n.faction = Faction.BELIEVER
         n.mood = Mood.CALM
         n.moodTime = 0f
@@ -1071,6 +1213,7 @@ class World(
     }
 
     private fun defect(n: Npc, label: String, faithCost: Float) {
+        cue(Cue.LOSS)
         n.faction = Faction.NON_BELIEVER
         n.mood = Mood.CALM
         n.moodTime = 0f
@@ -1200,6 +1343,7 @@ class World(
     /** Time is up. Everyone comes out, the houses stop mattering, and both flocks charge. */
     private fun startArmageddon() {
         armageddon = true
+        cue(Cue.HORN)
         sheltering = false
         banner = null
         for (n in npcs) {
@@ -1255,14 +1399,14 @@ class World(
                 b.built += dt / BUILD_TIME
                 if (b.built >= 1f) {
                     b.built = 1f
-                    b.hp = HOUSE_HP
-                    b.spawnClock = SPAWN_INTERVAL
+                    b.hp = if (owner == Faction.NON_BELIEVER) heathenHouseHp else HOUSE_HP
+                    b.spawnClock = spawnEvery(owner)
                 }
                 continue
             }
             b.spawnClock -= dt
             if (b.spawnClock <= 0f) {
-                b.spawnClock = SPAWN_INTERVAL
+                b.spawnClock = spawnEvery(owner)
                 if (count(owner) < POPULATION_CAP) {
                     val n = Npc(doorX(b), doorY(b), owner)
                     n.retarget = 0f
@@ -1278,14 +1422,17 @@ class World(
         }
         buildClockHeathen -= dt
         if (buildClockHeathen <= 0f) {
-            buildClockHeathen = HEATHEN_BUILD_INTERVAL
+            buildClockHeathen = heathenBuildInterval
             foundHouse(Faction.NON_BELIEVER)
         }
     }
 
+    private fun spawnEvery(owner: Faction?): Float =
+        if (owner == Faction.NON_BELIEVER) heathenSpawnInterval else SPAWN_INTERVAL
+
     /** Starts a new house near one the side already has, if there is room for it. */
     private fun foundHouse(owner: Faction) {
-        if (houses(owner) >= MAX_HOUSES || count(owner) < 3) return
+        if (houses(owner) >= (if (owner == Faction.NON_BELIEVER) heathenMaxHouses else MAX_HOUSES) || count(owner) < 3) return
         val own = ArrayList<Building>()
         for (b in buildings) if (b.standing && b.owner == owner) own += b
         if (own.isEmpty()) return
@@ -1325,13 +1472,14 @@ class World(
         rivalGustCooldown -= dt
 
         // You are charging a Meteor over one of its houses: it may throw a ward over the roof.
-        if (charging && charge > NOTICE_AT && wardCooldown <= 0f && rivalPrayer >= RIVAL_WARD_COST) {
+        if (charging && charge > NOTICE_AT && wardCooldown <= 0f && rivalPrayer >= rivalWardCost) {
             for (b in buildings) {
                 if (!b.standing || b.owner != Faction.NON_BELIEVER || b.built < 1f || b.ward > 0f) continue
                 if (distToRect(chargeX, chargeY, b) < METEOR_RADIUS * 0.6f) {
                     b.ward = RIVAL_WARD_TIME
-                    rivalPrayer -= RIVAL_WARD_COST
-                    wardCooldown = 12f
+                    cue(Cue.SHIELD)
+                    rivalPrayer -= rivalWardCost
+                    wardCooldown = rivalWardEvery
                     val cx = b.x + b.w / 2f
                     fx += Fx(FxKind.TEXT, cx, b.y, cx, b.y, 1.1f, 1.2f, "WARDED", false)
                     break
@@ -1360,6 +1508,7 @@ class World(
                     rivalBlast(o.x, o.y)
                 } else if (o.gust) {
                     // Blows your people out of wherever you put them.
+                    cue(Cue.WHOOSH)
                     fx += Fx(FxKind.GUST, o.x - o.dx * 110f, o.y - o.dy * 110f, o.x + o.dx * 110f, o.y + o.dy * 110f, GUST_WIDTH, 0.55f)
                     for (n in npcs) {
                         if (!n.alive || n.inside != null || n.faction != Faction.BELIEVER) continue
@@ -1368,9 +1517,18 @@ class World(
                             n.pushY += o.dy * 560f
                         }
                     }
+                } else if (o.whisper) {
+                    if (t != null) {
+                        if (isShielded(t)) {
+                            fx += Fx(FxKind.TEXT, t.x, t.y, t.x, t.y, 0.9f, 0.9f, "UNMOVED", true)
+                        } else {
+                            defect(t, "LURED AWAY", 5f)
+                        }
+                    }
                 } else if (t != null) {
                     fx += Fx(FxKind.BOLT, t.x, t.y, t.x, t.y, 1f, 0.28f, "", false)
                     shake = max(shake, 0.12f)
+                    cue(Cue.ZAP)
                     kill(t, BY_RIVAL)
                 }
                 if (believersLost > lostBefore && tauntClock <= 0f) {
@@ -1409,8 +1567,9 @@ class World(
                     dy /= d
                 }
                 rivalPrayer -= RIVAL_GUST_COST
-                rivalGustCooldown = 11f
+                rivalGustCooldown = rivalGustEvery
                 o.ttl += RIVAL_GUST_WARNING + 0.5f
+                cue(Cue.WARN)
                 omens += Omen(Omen.GUST, t.x, t.y, null, RIVAL_GUST_WARNING, RIVAL_GUST_WARNING, dx, dy)
                 return
             }
@@ -1423,7 +1582,8 @@ class World(
                 }
                 if (gathered >= 3) {
                     rivalPrayer -= RIVAL_GUST_COST
-                    rivalGustCooldown = 11f
+                    rivalGustCooldown = rivalGustEvery
+                    cue(Cue.WARN)
                     omens += Omen(Omen.GUST, ban.x, ban.y, null, RIVAL_GUST_WARNING, RIVAL_GUST_WARNING, 0f, 1f)
                     return
                 }
@@ -1431,7 +1591,7 @@ class World(
         }
 
         if (omens.size >= 2) return
-        if (rivalPrayer >= RIVAL_METEOR_COST) {
+        if (rivalPrayer >= rivalMeteorCost) {
             // Look for a knot of at least four Believers.
             var bestN: Npc? = null
             var bestCount = 3
@@ -1447,12 +1607,45 @@ class World(
                 }
             }
             if (bestN != null) {
-                rivalPrayer -= RIVAL_METEOR_COST
+                rivalPrayer -= rivalMeteorCost
+                cue(Cue.WARN)
                 omens += Omen(Omen.METEOR, bestN.x, bestN.y, null, RIVAL_METEOR_WARNING, RIVAL_METEOR_WARNING)
                 return
             }
         }
-        if (rivalPrayer >= RIVAL_BOLT_COST && rng.nextFloat() > 0.25f) {
+        if (rival == RivalGod.GENERAL && rivalPrayer >= INQUISITOR_COST) {
+            // The General's answer to everything: send a man with a sword.
+            var out = 0
+            for (n in npcs) if (n.alive && n.isInquisitor) out++
+            var from: Building? = null
+            for (b in buildings) if (b.standing && b.owner == Faction.NON_BELIEVER && b.built >= 1f) from = b
+            if (out < 3 && from != null) {
+                rivalPrayer -= INQUISITOR_COST
+                val n = Npc(doorX(from), doorY(from), Faction.NON_BELIEVER, Role.INQUISITOR)
+                npcs += n
+                cue(Cue.WARN)
+                fx += Fx(FxKind.TEXT, n.x.coerceIn(220f, W - 220f), n.y, n.x, n.y, 1.1f, 1.6f, "INQUISITOR SENT", false)
+                return
+            }
+        }
+        if (rival == RivalGod.SLYBOOTS && rivalPrayer >= WHISPER_COST && rng.nextFloat() < 0.5f) {
+            // Slyboots would sooner steal a follower than kill one.
+            val pool = ArrayList<Npc>()
+            for (n in npcs) {
+                if (!n.alive || n.faction != Faction.BELIEVER || n.isLeader || n.mood == Mood.ZEALOT || isShielded(n)) continue
+                var marked = false
+                for (o in omens) if (o.target === n) marked = true
+                if (!marked) pool += n
+            }
+            if (pool.isNotEmpty()) {
+                val victim = pool[rng.nextInt(pool.size)]
+                rivalPrayer -= WHISPER_COST
+                cue(Cue.WARN)
+                omens += Omen(Omen.WHISPER, victim.x, victim.y, victim, WHISPER_WARNING, WHISPER_WARNING)
+                return
+            }
+        }
+        if (rivalPrayer >= rivalBoltCost && rng.nextFloat() > 0.25f) {
             val pool = ArrayList<Npc>()
             for (n in npcs) {
                 if (!n.alive || n.faction != Faction.BELIEVER || n.isLeader || isShielded(n)) continue
@@ -1462,8 +1655,9 @@ class World(
             }
             if (pool.isNotEmpty()) {
                 val victim = pool[rng.nextInt(pool.size)]
-                rivalPrayer -= RIVAL_BOLT_COST
-                omens += Omen(Omen.BOLT, victim.x, victim.y, victim, RIVAL_BOLT_WARNING, RIVAL_BOLT_WARNING)
+                rivalPrayer -= rivalBoltCost
+                cue(Cue.WARN)
+                omens += Omen(Omen.BOLT, victim.x, victim.y, victim, rivalBoltWarning, rivalBoltWarning)
             }
         }
     }
@@ -1472,6 +1666,7 @@ class World(
     private fun rivalBlast(x: Float, y: Float) {
         val radius = RIVAL_METEOR_RADIUS
         fx += Fx(FxKind.BLAST, x, y, x, y, radius, 0.5f, "", false)
+        cue(Cue.BOOM)
         shake = max(shake, 0.5f)
         for (n in npcs) {
             if (n.alive && n.inside == null && n.faction == Faction.BELIEVER && dist2(x, y, n.x, n.y) < radius * radius) {

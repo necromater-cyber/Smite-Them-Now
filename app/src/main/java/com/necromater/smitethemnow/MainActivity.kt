@@ -15,6 +15,11 @@ class MainActivity : Activity() {
         setContentView(game)
     }
 
+    override fun onDestroy() {
+        game.release()
+        super.onDestroy()
+    }
+
     /** Back leaves a level for the chapter list. On the chapter list it closes the app. */
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {

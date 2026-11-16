@@ -11,8 +11,8 @@ android {
         applicationId = "com.necromater.smitethemnow"
         minSdk = 24
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.6.0-poc"
+        versionCode = 8
+        versionName = "0.7.0-poc"
     }
 
     buildTypes {

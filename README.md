@@ -55,7 +55,21 @@ Stars: one for winning, one for losing no Believers (dead or led astray), one fo
 
 A longer mode, about five minutes, last on the chapter list. It borrows from Populous. The game here is the Prayer budget: every point spent on defence is one not spent on attack, and the rival god makes you pay for both.
 
-**Before the match** you pick the ground and a doctrine.
+**Before the match** you pick the ground, the rival god, a doctrine, and five miracles.
+
+| Rival god | How it plays |
+|---|---|
+| Vorn | The Stormlord. Cheap Bolts with a shorter warning. |
+| Mother Brick | Out-builds you: faster, sturdier, more numerous houses. Bolts alone will not hold her. |
+| The General | Sends Inquisitors after your Prophet. Ignore them and the war is over inside a minute. |
+| Slyboots | Wards and Gusts twice as often, and lures Believers away (a purple mark) instead of killing them. |
+
+| Miracle | Gesture | Prayer | Unlocked by |
+|---|---|---|---|
+| Bolt, Meteor, Gust, Shield, Rally | as before | as before | from the start |
+| Anvil | Tap | 22 | 1 Holy War win. Small, instant, flattens whoever is under it and cracks a building in one hit. |
+| Quake | Hold | 30 | 2 wins. Kills nobody. Cracks every building in a wide circle, yours included, and frightens heathens indoors. |
+| Convert | Tap | 18 | 3 wins. The nearest heathen follower joins you on the spot. Free if nobody is in reach. |
 
 | Ground | What it changes |
 |---|---|
@@ -82,6 +96,12 @@ A longer mode, about five minutes, last on the chapter list. It borrows from Pop
 
 **Winning.** Wipe out every heathen and every heathen house inside five minutes for three stars. Otherwise the clock runs out and it is **Armageddon**: nobody shelters, nobody builds, nobody prays, and both flocks charge. Whatever Prayer you saved is all you have to tip it. Last flock standing wins.
 
+## Sound
+
+Thirteen short effects and vibration on impacts. Tap the bottom line of the chapter list to turn them off. The sounds are synthesised placeholders: `python3 tools/make_sounds.py` regenerates them into `app/src/main/res/raw`.
+
+The same line shows how many rounds have been played on this device and how often "Again" was tapped, for playtesting.
+
 ## What is in the code
 
 ```
@@ -89,6 +109,7 @@ app/src/main/java/com/necromater/smitethemnow/
   sim/Entities.kt   data: NPCs, buildings, barrels, fire, shields, rods, banners, omens, effects
   sim/World.kt      all the rules, the level layouts, every tuning number at the top
   GameView.kt       drawing, screens and touch input
+  Sfx.kt            sound effects and vibration
   MainActivity.kt   launches the view, handles Back
 ```
 

@@ -9,6 +9,7 @@ import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
 import com.necromater.smitethemnow.sim.Building
+import com.necromater.smitethemnow.sim.Cue
 import com.necromater.smitethemnow.sim.Doctrine
 import com.necromater.smitethemnow.sim.Faction
 import com.necromater.smitethemnow.sim.Fx
@@ -17,6 +18,7 @@ import com.necromater.smitethemnow.sim.Mood
 import com.necromater.smitethemnow.sim.Npc
 import com.necromater.smitethemnow.sim.Outcome
 import com.necromater.smitethemnow.sim.Power
+import com.necromater.smitethemnow.sim.RivalGod
 import com.necromater.smitethemnow.sim.Rod
 import com.necromater.smitethemnow.sim.World
 import kotlin.math.cos
@@ -72,12 +74,22 @@ class GameView(context: Context) : View(context) {
     private val doctrines = arrayOf(Doctrine.SHEPHERD, Doctrine.WRATHFUL, Doctrine.TRICKSTER)
     private var warMap = prefs.getInt("war_map", 0).coerceIn(0, 2)
     private var warDoctrine = prefs.getInt("war_doctrine", 0).coerceIn(0, 2)
-    private var setupMapTop = 0f
-    private var setupMapBottom = 0f
-    private val setupDocTop = FloatArray(3)
-    private val setupDocBottom = FloatArray(3)
-    private var setupBeginTop = 0f
-    private var setupBeginBottom = 0f
+    private val rivals = RivalGod.values()
+    private var warRival = prefs.getInt("war_rival", 0).coerceIn(0, rivals.size - 1)
+    private val allPowers = Power.values()
+    /** One bit per power in [allPowers]. Starts as the standard five. */
+    private var warDeck = prefs.getInt("war_deck", 31)
+    private var warWins = prefs.getInt("war_wins", 0)
+    private var setupPage = 0
+    private var newMiracle = ""
+
+    // Tap targets on the setup pages: left, top, right, bottom, id.
+    private val hitRects = ArrayList<FloatArray>()
+
+    private val sfx = Sfx(context)
+    private val heard = BooleanArray(Cue.values().size)
+    private var played = prefs.getInt("stat_played", 0)
+    private var playedAgain = prefs.getInt("stat_again", 0)
 
     private var lastNanos = 0L
     private var clock = 0f
@@ -103,6 +115,7 @@ class GameView(context: Context) : View(context) {
     private var buttons: List<String> = emptyList()
 
     init {
+        sfx.enabled = prefs.getInt("sound", 1) == 1
         val r = Random(3)
         for (i in blotX.indices) {
             blotX[i] = r.nextFloat() * World.W
@@ -123,22 +136,75 @@ class GameView(context: Context) : View(context) {
 
     // ---------------------------------------------------------------- flow
 
+    /** How many Holy War wins a miracle needs before it can go in the deck. */
+    private fun winsNeeded(p: Power): Int = when (p) {
+        Power.ANVIL -> 1
+        Power.QUAKE -> 2
+        Power.BEAM -> 3
+        else -> 0
+    }
+
+    private fun inDeck(i: Int): Boolean = (warDeck shr i) and 1 == 1
+
+    private fun deckSize(): Int {
+        var n = 0
+        for (i in allPowers.indices) if (inDeck(i)) n++
+        return n
+    }
+
+    private fun deck(): List<Power> {
+        val out = ArrayList<Power>()
+        for (i in allPowers.indices) if (inDeck(i)) out += allPowers[i]
+        return out
+    }
+
     /** [setup] false skips the Holy War choices, for "Again". */
     private fun startLevel(index: Int, setup: Boolean = true) {
         level = index.coerceIn(0, World.LEVELS.size - 1)
         if (level == World.HOLY_WAR && setup) {
+            setupPage = 0
             screen = Screen.SETUP
             return
         }
         world = if (level == World.HOLY_WAR) {
-            World(level, System.nanoTime(), doctrines[warDoctrine], warMap)
+            World(level, System.nanoTime(), doctrines[warDoctrine], warMap, rivals[warRival], deck())
         } else {
             World(level, System.nanoTime())
         }
-        selected = Power.LIGHTNING
+        selected = world.powers[0]
         dragging = false
         overTime = 0f
+        newMiracle = ""
+        played++
+        prefs.edit().putInt("stat_played", played).apply()
         screen = Screen.BRIEFING
+    }
+
+    /** The activity is going away. */
+    fun release() {
+        sfx.release()
+    }
+
+    /** Plays whatever the sim queued this frame, each kind of sound once at most. */
+    private fun playCues() {
+        val q = world.cues
+        if (q.isEmpty()) return
+        java.util.Arrays.fill(heard, false)
+        for (i in q.indices) {
+            val cue = q[i]
+            if (heard[cue.ordinal]) continue
+            heard[cue.ordinal] = true
+            sfx.play(cue.ordinal)
+            when (cue) {
+                Cue.ZAP -> sfx.buzz(12L)
+                Cue.BOOM -> sfx.buzz(45L)
+                Cue.CRUMBLE -> sfx.buzz(70L)
+                Cue.LOSS -> sfx.buzz(30L)
+                Cue.HORN -> sfx.buzz(90L)
+                else -> {}
+            }
+        }
+        q.clear()
     }
 
     /** Called for the system Back button. Returns false when the app should close. */
@@ -156,8 +222,16 @@ class GameView(context: Context) : View(context) {
         screen = Screen.RESULT
         overTime = 0f
         dragging = false
-        if (world.outcome == Outcome.VICTORY && world.stars() > bestStars(level)) {
+        val won = world.outcome == Outcome.VICTORY
+        sfx.play(if (won) Sfx.WIN else Sfx.LOSE)
+        if (won && world.stars() > bestStars(level)) {
             prefs.edit().putInt("stars_$level", world.stars()).apply()
+        }
+        if (won && level == World.HOLY_WAR) {
+            warWins++
+            prefs.edit().putInt("war_wins", warWins).apply()
+            // Winning unlocks the next miracle, if there is one left.
+            for (p in allPowers) if (winsNeeded(p) == warWins) newMiracle = p.label
         }
     }
 
@@ -172,26 +246,58 @@ class GameView(context: Context) : View(context) {
                     for (i in cardTop.indices) {
                         if (sy >= cardTop[i] && sy <= cardBottom[i]) startLevel(i)
                     }
+                    if (sy > height * 0.945f) {
+                        sfx.enabled = !sfx.enabled
+                        prefs.edit().putInt("sound", if (sfx.enabled) 1 else 0).apply()
+                        sfx.play(Cue.CONVERT.ordinal)
+                    }
                 }
                 Screen.SETUP -> {
-                    if (sy >= setupMapTop && sy <= setupMapBottom) {
-                        warMap = (sx / (width / 3f)).toInt().coerceIn(0, 2)
-                        prefs.edit().putInt("war_map", warMap).apply()
+                    var id = -1
+                    for (r in hitRects) {
+                        if (sx >= r[0] && sx <= r[2] && sy >= r[1] && sy <= r[3]) id = r[4].toInt()
                     }
-                    for (i in 0 until 3) {
-                        if (sy >= setupDocTop[i] && sy <= setupDocBottom[i]) {
-                            warDoctrine = i
+                    when {
+                        id in 100..102 -> {
+                            warMap = id - 100
+                            prefs.edit().putInt("war_map", warMap).apply()
+                        }
+                        id in 200..299 -> {
+                            warRival = (id - 200).coerceIn(0, rivals.size - 1)
+                            prefs.edit().putInt("war_rival", warRival).apply()
+                        }
+                        id in 300..302 -> {
+                            warDoctrine = id - 300
                             prefs.edit().putInt("war_doctrine", warDoctrine).apply()
                         }
+                        id in 400..499 -> {
+                            val i = (id - 400).coerceIn(0, allPowers.size - 1)
+                            if (warWins < winsNeeded(allPowers[i])) {
+                                sfx.play(Cue.DENY.ordinal)
+                            } else if (inDeck(i)) {
+                                warDeck = warDeck and (1 shl i).inv()
+                            } else if (deckSize() < 5) {
+                                warDeck = warDeck or (1 shl i)
+                            } else {
+                                sfx.play(Cue.DENY.ordinal)
+                            }
+                            prefs.edit().putInt("war_deck", warDeck).apply()
+                        }
+                        id == 500 -> setupPage = 1
+                        id == 501 -> setupPage = 0
+                        id == 502 -> if (deckSize() == 5) startLevel(World.HOLY_WAR, false) else sfx.play(Cue.DENY.ordinal)
                     }
-                    if (sy >= setupBeginTop && sy <= setupBeginBottom) startLevel(World.HOLY_WAR, false)
                 }
                 Screen.BRIEFING -> screen = Screen.PLAY
                 Screen.RESULT -> {
                     if (overTime > 0.8f && buttons.isNotEmpty() && sy >= buttonTop && sy <= buttonBottom) {
                         val index = (sx / (width / buttons.size.toFloat())).toInt().coerceIn(0, buttons.size - 1)
                         when (buttons[index]) {
-                            "Again" -> startLevel(level, false)
+                            "Again" -> {
+                                playedAgain++
+                                prefs.edit().putInt("stat_again", playedAgain).apply()
+                                startLevel(level, false)
+                            }
                             "Next" -> startLevel(level + 1)
                             else -> screen = Screen.MENU
                         }
@@ -210,6 +316,9 @@ class GameView(context: Context) : View(context) {
                         Power.LIGHTNING -> world.castLightning(wx, wy)
                         Power.SHIELD -> world.castShield(wx, wy)
                         Power.RALLY -> world.castRally(wx, wy)
+                        Power.ANVIL -> world.castAnvil(wx, wy)
+                        Power.BEAM -> world.castBeam(wx, wy)
+                        Power.QUAKE -> world.beginCharge(wx, wy, Power.QUAKE)
                         Power.METEOR -> world.beginCharge(wx, wy)
                         Power.GUST -> {
                             dragging = true
@@ -259,6 +368,7 @@ class GameView(context: Context) : View(context) {
 
         if (screen == Screen.PLAY) {
             world.update(dt)
+            playCues()
             if (world.outcome != Outcome.PLAYING) finishLevel()
         } else if (screen == Screen.RESULT) {
             world.update(dt)
@@ -389,7 +499,8 @@ class GameView(context: Context) : View(context) {
                 val r = 26f + 44f * left
                 stroke(ink, 7f)
                 c.drawCircle(o.x, o.y, r, paint)
-                stroke(vermilion, 4f)
+                // Purple for a lure, red for a Bolt.
+                stroke(if (o.whisper) Color.rgb(150, 70, 170) else vermilion, 4f)
                 c.drawCircle(o.x, o.y, r, paint)
                 c.drawLine(o.x - r - 10f, o.y, o.x - r + 10f, o.y, paint)
                 c.drawLine(o.x + r - 10f, o.y, o.x + r + 10f, o.y, paint)
@@ -401,18 +512,18 @@ class GameView(context: Context) : View(context) {
         if (w.charging) {
             val full = w.charge >= 1f
             fill(Color.argb((40 + 80 * w.charge).toInt(), 196, 52, 36))
-            c.drawCircle(w.chargeX, w.chargeY, World.METEOR_RADIUS * w.charge, paint)
+            c.drawCircle(w.chargeX, w.chargeY, w.chargeRadius * w.charge, paint)
             stroke(ink, if (full) 9f else 6f)
-            c.drawCircle(w.chargeX, w.chargeY, World.METEOR_RADIUS, paint)
+            c.drawCircle(w.chargeX, w.chargeY, w.chargeRadius, paint)
             stroke(if (full) goldLight else gold, if (full) 5f else 3f)
-            c.drawCircle(w.chargeX, w.chargeY, World.METEOR_RADIUS, paint)
+            c.drawCircle(w.chargeX, w.chargeY, w.chargeRadius, paint)
             if (full) {
                 var k = 0
                 while (k < 12) {
                     val a = k * 0.5236f + clock * 0.8f
                     c.drawLine(
-                        w.chargeX + cos(a) * (World.METEOR_RADIUS + 10f), w.chargeY + sin(a) * (World.METEOR_RADIUS + 10f),
-                        w.chargeX + cos(a) * (World.METEOR_RADIUS + 30f), w.chargeY + sin(a) * (World.METEOR_RADIUS + 30f), paint
+                        w.chargeX + cos(a) * (w.chargeRadius + 10f), w.chargeY + sin(a) * (w.chargeRadius + 10f),
+                        w.chargeX + cos(a) * (w.chargeRadius + 30f), w.chargeY + sin(a) * (w.chargeRadius + 30f), paint
                     )
                     k++
                 }
@@ -939,8 +1050,8 @@ class GameView(context: Context) : View(context) {
             meter(c, rl, hudH * 0.84f, rr, hudH * 0.97f, world.rivalPrayer / World.MAX_PRAYER, vermilion)
             // Notches where it can afford a Bolt and a Meteor, so you can see what is coming.
             stroke(ink, 3f)
-            val boltAt = rl + (rr - rl) * World.RIVAL_BOLT_COST / World.MAX_PRAYER
-            val meteorAt = rl + (rr - rl) * World.RIVAL_METEOR_COST / World.MAX_PRAYER
+            val boltAt = rl + (rr - rl) * world.rivalBoltCost / World.MAX_PRAYER
+            val meteorAt = rl + (rr - rl) * world.rivalMeteorCost / World.MAX_PRAYER
             c.drawLine(boltAt, hudH * 0.82f, boltAt, hudH * 0.99f, paint)
             c.drawLine(meteorAt, hudH * 0.82f, meteorAt, hudH * 0.99f, paint)
         } else {
@@ -1078,58 +1189,84 @@ class GameView(context: Context) : View(context) {
             c.drawText(stars(bestStars(i)), textL, t + cardH * 0.62f, paint)
             fitted(c, info.blurb, (cardL + cardR) / 2f, t + cardH * 0.87f, cardH * 0.15f, cardR - cardL - 32f, ink, false)
         }
-        fitted(c, "Tap a chapter, or go to war", w / 2f, h * 0.935f, w * 0.042f, w * 0.7f, vermilion, true)
+        fitted(c, "Tap a chapter, or go to war", w / 2f, h * 0.928f, w * 0.042f, w * 0.7f, vermilion, true)
+        val footer = (if (sfx.enabled) "Sound on" else "Sound off") + " (tap to change)  ·  " + played + " played, " + playedAgain + " again"
+        fitted(c, footer, w / 2f, h * 0.96f, w * 0.03f, w * 0.78f, ink, false)
     }
 
-    /** Holy War: pick the ground and a doctrine before the match. */
+    /** One tappable option on a setup page, with an optional second line. */
+    private fun option(c: Canvas, l: Float, t: Float, r: Float, b: Float, title: String, sub: String, on: Boolean, usable: Boolean, id: Int) {
+        hitRects += floatArrayOf(l, t, r, b, id.toFloat())
+        fill(if (!usable) Color.rgb(196, 182, 150) else if (on) ultramarine else vellumDark)
+        c.drawRoundRect(l, t, r, b, 14f, 14f, paint)
+        stroke(if (on) gold else ink, if (on) 6f else 3f)
+        c.drawRoundRect(l, t, r, b, 14f, 14f, paint)
+        val w = width.toFloat()
+        val titleInk = if (!usable) Color.argb(120, 46, 32, 22) else if (on) goldLight else ink
+        val subInk = if (!usable) Color.argb(120, 46, 32, 22) else if (on) vellum else vermilion
+        if (sub.isEmpty()) {
+            fitted(c, title, (l + r) / 2f, t + (b - t) * 0.64f, w * 0.042f, r - l - 22f, titleInk, true)
+        } else {
+            fitted(c, title, (l + r) / 2f, t + (b - t) * 0.44f, w * 0.044f, r - l - 26f, titleInk, true)
+            fitted(c, sub, (l + r) / 2f, t + (b - t) * 0.82f, w * 0.033f, r - l - 26f, subInk, false)
+        }
+    }
+
+    /** Holy War, two pages: the ground and the rival, then your doctrine and your miracles. */
     private fun drawSetup(c: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
         val m = w * 0.05f
+        hitRects.clear()
         sheet(c, m, m, w - m, h - m)
         val inner = w - 2f * m - 80f
-        fitted(c, "Holy War", w / 2f, h * 0.13f, w * 0.12f, inner, ink, true)
-        fitted(c, "A rival god. Two growing flocks. Five minutes.", w / 2f, h * 0.175f, w * 0.04f, inner, vermilion, false)
+        val l = m + w * 0.05f
+        val r = w - m - w * 0.05f
+        fitted(c, "Holy War", w / 2f, h * 0.115f, w * 0.12f, inner, ink, true)
 
-        fitted(c, "The ground", w / 2f, h * 0.25f, w * 0.05f, inner, ink, true)
-        setupMapTop = h * 0.27f
-        setupMapBottom = h * 0.35f
-        val slot = w / 3f
-        for (i in 0 until 3) {
-            val l = max(m + 24f, i * slot + slot * 0.06f)
-            val r = min(w - m - 24f, (i + 1) * slot - slot * 0.06f)
-            val on = i == warMap
-            fill(if (on) ultramarine else vellumDark)
-            c.drawRoundRect(l, setupMapTop, r, setupMapBottom, 14f, 14f, paint)
-            stroke(if (on) gold else ink, if (on) 6f else 3f)
-            c.drawRoundRect(l, setupMapTop, r, setupMapBottom, 14f, 14f, paint)
-            fitted(c, mapNames[i], (l + r) / 2f, setupMapTop + (setupMapBottom - setupMapTop) * 0.62f, w * 0.042f, r - l - 24f, if (on) goldLight else ink, true)
+        if (setupPage == 0) {
+            fitted(c, "Choose your ground and your enemy", w / 2f, h * 0.158f, w * 0.04f, inner, vermilion, false)
+
+            fitted(c, "The ground", w / 2f, h * 0.232f, w * 0.05f, inner, ink, true)
+            val slot = (r - l) / 3f
+            for (i in 0 until 3) {
+                option(c, l + i * slot + 6f, h * 0.25f, l + (i + 1) * slot - 6f, h * 0.32f, mapNames[i], "", i == warMap, true, 100 + i)
+            }
+
+            fitted(c, "The rival god", w / 2f, h * 0.4f, w * 0.05f, inner, ink, true)
+            for (i in rivals.indices) {
+                val t = h * 0.42f + i * h * 0.092f
+                option(c, l, t, r, t + h * 0.082f, rivals[i].label, rivals[i].blurb, i == warRival, true, 200 + i)
+            }
+            option(c, w * 0.28f, h * 0.82f, w * 0.72f, h * 0.895f, "Next", "", true, true, 500)
+        } else {
+            fitted(c, "against " + rivals[warRival].label + ", at " + mapNames[warMap], w / 2f, h * 0.158f, w * 0.04f, inner, vermilion, false)
+
+            fitted(c, "Your doctrine", w / 2f, h * 0.225f, w * 0.05f, inner, ink, true)
+            for (i in 0 until 3) {
+                val t = h * 0.243f + i * h * 0.088f
+                option(c, l, t, r, t + h * 0.078f, doctrines[i].label, doctrines[i].blurb, i == warDoctrine, true, 300 + i)
+            }
+
+            val count = deckSize()
+            fitted(c, "Your miracles: " + count + " of 5", w / 2f, h * 0.565f, w * 0.05f, inner, if (count == 5) ink else vermilion, true)
+            val slot = (r - l) / 4f
+            for (i in allPowers.indices) {
+                val p = allPowers[i]
+                val col = i % 4
+                val row = i / 4
+                val t = h * 0.585f + row * h * 0.085f
+                val need = winsNeeded(p)
+                val unlocked = warWins >= need
+                val sub = if (unlocked) p.cost.toInt().toString() + " · " + p.gesture else if (need == 1) "1 win" else need.toString() + " wins"
+                option(c, l + col * slot + 5f, t, l + (col + 1) * slot - 5f, t + h * 0.075f, p.label, sub, unlocked && inDeck(i), unlocked, 400 + i)
+            }
+            val hint = if (warWins >= 3) "Every miracle is yours. Choose five." else "Win Holy Wars to unlock more. Wins so far: " + warWins
+            fitted(c, hint, w / 2f, h * 0.785f, w * 0.034f, inner, ink, false)
+
+            option(c, l, h * 0.82f, w * 0.42f, h * 0.895f, "Back", "", false, true, 501)
+            option(c, w * 0.48f, h * 0.82f, r, h * 0.895f, "Begin", "", count == 5, count == 5, 502)
         }
-
-        fitted(c, "Your doctrine", w / 2f, h * 0.43f, w * 0.05f, inner, ink, true)
-        val dl = m + w * 0.06f
-        val dr = w - m - w * 0.06f
-        for (i in 0 until 3) {
-            val t = h * 0.455f + i * h * 0.105f
-            val b = t + h * 0.092f
-            setupDocTop[i] = t
-            setupDocBottom[i] = b
-            val on = i == warDoctrine
-            fill(if (on) Color.rgb(246, 238, 214) else vellumDark)
-            c.drawRoundRect(dl, t, dr, b, 14f, 14f, paint)
-            stroke(if (on) gold else ink, if (on) 7f else 3f)
-            c.drawRoundRect(dl, t, dr, b, 14f, 14f, paint)
-            fitted(c, doctrines[i].label, w / 2f, t + (b - t) * 0.42f, w * 0.05f, dr - dl - 40f, ink, true)
-            fitted(c, doctrines[i].blurb, w / 2f, t + (b - t) * 0.8f, w * 0.036f, dr - dl - 40f, vermilion, false)
-        }
-
-        setupBeginTop = h * 0.81f
-        setupBeginBottom = h * 0.89f
-        fill(ultramarine)
-        c.drawRoundRect(w * 0.25f, setupBeginTop, w * 0.75f, setupBeginBottom, 16f, 16f, paint)
-        stroke(ink, 3.5f)
-        c.drawRoundRect(w * 0.25f, setupBeginTop, w * 0.75f, setupBeginBottom, 16f, 16f, paint)
-        fitted(c, "Begin", w / 2f, setupBeginTop + (setupBeginBottom - setupBeginTop) * 0.66f, w * 0.06f, w * 0.4f, goldLight, true)
     }
 
     private fun drawBriefing(c: Canvas) {
@@ -1144,7 +1281,7 @@ class GameView(context: Context) : View(context) {
         val b = h * 0.74f
         sheet(c, l, t, r, b)
         val inner = r - l - 60f
-        fitted(c, if (level == World.HOLY_WAR) "The long game" else "Chapter " + numerals[level], w / 2f, t + (b - t) * 0.12f, w * 0.045f, inner, vermilion, false)
+        fitted(c, if (level == World.HOLY_WAR) "Against " + world.rival.label else "Chapter " + numerals[level], w / 2f, t + (b - t) * 0.12f, w * 0.045f, inner, vermilion, false)
         fitted(c, info.title, w / 2f, t + (b - t) * 0.25f, w * 0.085f, inner, ink, true)
         fitted(c, info.blurb, w / 2f, t + (b - t) * 0.35f, w * 0.04f, inner, ink, false)
         stroke(gold, 3f)
@@ -1187,6 +1324,9 @@ class GameView(context: Context) : View(context) {
             fitted(c, (if (world.goal3Met) "★ " else "☆ ") + world.goal3Text, w / 2f, t + ph * 0.7f, w * 0.044f, inner, if (world.goal3Met) ink else vermilion, false)
         }
 
+        if (newMiracle.isNotEmpty()) {
+            fitted(c, "New miracle for your deck: " + newMiracle, w / 2f, t + ph * 0.765f, w * 0.042f, inner, ultramarine, true)
+        }
         buttons = if (won && level < World.LEVELS.size - 1) listOf("Again", "Next", "Chapters") else listOf("Again", "Chapters")
         buttonTop = t + ph * 0.79f
         buttonBottom = t + ph * 0.93f

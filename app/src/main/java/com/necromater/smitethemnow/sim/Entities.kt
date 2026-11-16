@@ -21,7 +21,11 @@ enum class Power(val label: String, val cost: Float, val gesture: String) {
     METEOR("Meteor", 35f, "hold"),
     GUST("Gust", 8f, "swipe"),
     SHIELD("Shield", 15f, "tap"),
-    RALLY("Rally", 10f, "tap")
+    RALLY("Rally", 10f, "tap"),
+    // Unlocked by winning Holy Wars.
+    ANVIL("Anvil", 22f, "tap"),
+    QUAKE("Quake", 30f, "hold"),
+    BEAM("Convert", 18f, "tap")
 }
 
 enum class Outcome { PLAYING, VICTORY, DEFEAT }
@@ -35,6 +39,17 @@ enum class Doctrine(val label: String, val blurb: String) {
 }
 
 enum class FxKind { BOLT, BLAST, GUST, TEXT, ORB }
+
+/** Things worth a noise. The sim queues them, the app plays them. */
+enum class Cue { ZAP, BOOM, WHOOSH, SHIELD, SMITE, LOSS, CONVERT, CRUMBLE, WARN, HORN, DENY }
+
+/** The gods you can go to war with. Each one spends its Prayer differently. */
+enum class RivalGod(val label: String, val blurb: String) {
+    VORN("Vorn", "The Stormlord. Bolts, and plenty of them."),
+    BRICK("Mother Brick", "Out-builds you. Sturdy houses, filled fast."),
+    GENERAL("The General", "Sends Inquisitors after your Prophet."),
+    SLYBOOTS("Slyboots", "Wards, Gusts, and lures your flock away.")
+}
 
 class Npc(var x: Float, var y: Float, var faction: Faction, val role: Role = Role.FOLLOWER) {
     var alive = true
@@ -129,7 +144,11 @@ class Omen(
         const val BOLT = 0
         const val METEOR = 1
         const val GUST = 2
+        /** Slyboots only: the marked Believer walks over to the other side. */
+        const val WHISPER = 3
     }
+
+    val whisper: Boolean get() = kind == WHISPER
 
     val meteor: Boolean get() = kind == METEOR
     val gust: Boolean get() = kind == GUST
